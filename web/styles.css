@@ -3193,70 +3193,188 @@ body.updating .gateway .brand, body.updating .gateway .brand-sep { display: none
   transition: width 0.18s ease;
 }
 
-/* ── the model list ───────────────────────────────────────────────────── */
-/* The card's only view: one row for each model that served a request. The
-   routing stage, its wires and its flying magpies used to live here. */
+/* ── the provider-grouped model list ──────────────────────────────────── */
+/* Light, opaque card echoing magpie's own quota page: grey uppercase group
+   heads with a horizontal allowance bar, and one white row per model. */
 
-.content {
-  grid-template-rows: 30px 10px 1fr 6px 16px;
+:root {
+  --ink: #1d1d1f;
+  --muted: #3a3a3c;
+  --faint: #86868b;
+  --accent: #007aff;
+  --accent-deep: #0060df;
+  --good: #34c759;
+  --warn: #ff9500;
+  --bad: #ff3b30;
 }
 
+.card {
+  border: 1px solid #e5e5ea;
+  border-radius: 16px;
+  background: #f5f5f7;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  text-shadow: none;
+}
+
+.aurora,
+.card::before,
+.card::after {
+  display: none;
+}
+
+body.native-material .card {
+  border: 1px solid #e5e5ea;
+  border-radius: 16px;
+  background: #f5f5f7;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  text-shadow: none;
+}
+
+/* Popups and drawers follow the card into the light theme. */
+.quick-menu {
+  border-color: #e5e5ea;
+  background: #fff;
+  backdrop-filter: none;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+}
+
+.quick-menu button:hover,
+.quick-menu button:focus-visible {
+  background: #f0f0f5;
+}
+
+.quick-menu hr {
+  border-top-color: #e5e5ea;
+}
+
+.token-pill {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.token-pill:hover {
+  border-color: rgba(0, 0, 0, 0.14);
+  background: #fff;
+}
+
+.token-pill:active {
+  background: #f5f5f7;
+}
+
+.compact-pill {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: #fff;
+  color: #1d1d1f;
+}
+
+.settings-pane {
+  background: #f5f5f7;
+}
+
+.settings-inner {
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+
+.settings-inner::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.settings-inner::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* The list itself. */
 .model-list {
   grid-row: 3;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   min-height: 0;
 }
 
-.model-head,
-.model-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) 0.85fr 0.8fr 0.8fr 0.9fr;
-  gap: 8px;
-  align-items: center;
-}
-
-.model-head {
-  padding: 0 12px;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  color: var(--faint);
-}
-
-.model-rows {
+.provider-groups {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   min-height: 0;
 }
 
+.provider-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 4px;
+  color: #86868b;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.provider-quota {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.provider-left {
+  color: #86868b;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.provider-bar {
+  width: 80px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #e5e5ea;
+}
+
+.provider-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #34c759;
+}
+
+.provider-bar i.mid { background: #ff9500; }
+.provider-bar i.low { background: #ff3b30; }
+
 .model-row {
-  height: 46px;
-  padding: 0 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  gap: 14px;
+  align-items: center;
+  height: 44px;
+  padding: 0 14px;
   border-radius: 12px;
-  background: linear-gradient(180deg, var(--node-bg-top), var(--node-bg-bottom));
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  color: #3a3a3c;
   font-size: 12px;
-}
-
-.model-row.live {
-  box-shadow: inset 0 0 0 1px rgb(161 139 255 / 0.38), inset 0 1px 0 rgb(255 255 255 / 0.05);
-}
-
-.model-row.error {
-  box-shadow: inset 0 0 0 1px rgb(255 131 151 / 0.38), inset 0 1px 0 rgb(255 255 255 / 0.05);
 }
 
 .col-model {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
 .model-name {
   overflow: hidden;
+  color: #1d1d1f;
   font-weight: 600;
   letter-spacing: -0.01em;
   text-overflow: ellipsis;
@@ -3265,62 +3383,56 @@ body.updating .gateway .brand, body.updating .gateway .brand-sep { display: none
 
 .row-reroute {
   flex: none;
+  color: #ff9500;
   font-size: 9.5px;
-  color: var(--warn);
-}
-
-.col-state {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+  font-style: normal;
 }
 
 .state-word {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 11.5px;
-  text-overflow: ellipsis;
+  color: #86868b;
+  font-size: 11px;
   white-space: nowrap;
 }
 
-.model-row.live .state-word { color: var(--accent); }
-.model-row.error .state-word { color: var(--bad); }
+.model-row.live .state-word { color: #007aff; }
+.model-row.error .state-word { color: #ff3b30; }
 
 .col-ms,
 .col-ttft,
 .col-speed {
   overflow: hidden;
+  color: #3a3a3c;
   font-size: 12px;
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.col-ttft,
-.col-speed { color: var(--muted); }
+.col-ms.missing,
+.col-ttft.missing,
+.col-speed.missing { color: #c7c7cc; }
 
 .model-empty {
   margin: 0;
   padding: 18px 0;
+  color: #86868b;
   text-align: center;
-  color: var(--faint);
 }
 
 .model-hidden {
   margin: 0;
+  color: #86868b;
   font-size: 10.5px;
   text-align: right;
-  color: var(--faint);
 }
 
 /* A dropped gateway keeps the last frame and labels it, instead of blanking a
    list the user is still reading. */
-body.stale .model-rows { opacity: 0.5; }
+body.stale .provider-groups { opacity: 0.55; }
 
 body.stale .live-word::after {
   content: " · 暂未刷新";
-  color: var(--warn);
+  color: #ff9500;
 }
 
 .list-footer {
@@ -3329,5 +3441,9 @@ body.stale .live-word::after {
   gap: 8px;
   align-items: center;
   font-size: 10px;
-  color: var(--faint);
+  color: #86868b;
 }
+
+/* Small chrome bits that were tuned for the dark card. */
+.drag-grip i { background: #b0b0b8; }
+.brand-sep { background: rgba(0, 0, 0, 0.11); }

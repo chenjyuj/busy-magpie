@@ -16,9 +16,7 @@ const { heartbeat } = require('./launch-policy.cjs');
 const { parseGateway, gatewayProblem } = require('./gateway-config.cjs');
 const { fitWindowBounds } = require('./window-bounds.cjs');
 const { windowMaterial } = require('./window-material.cjs');
-const MATERIAL = windowMaterial(process.platform, os.release());
-let activeMaterial = MATERIAL.kind;
-let windowSurface = null;
+const MATERIAL = windowMaterial();
 
 const IS_PREVIEW = process.argv.includes('--preview');
 app.setName(IS_PREVIEW ? 'Busy Magpie Preview' : 'Busy Magpie');
@@ -28,7 +26,6 @@ if (IS_PREVIEW) {
 
 const WIDTH = 632;
 const HEIGHT = 432;
-const DEFAULT_OPACITY = 0.3;
 const COMPACT_WIDTH = 360;
 const COMPACT_HEIGHT = 112;
 // The card is drawn on a 600×400 canvas inside 16px of padding. Keeping the
@@ -136,7 +133,6 @@ function defaults() {
   return {
     topmost: true,
     maskAccounts: true,
-    opacity: DEFAULT_OPACITY,
     left: null,
     top: null,
     width: WIDTH,
@@ -191,10 +187,6 @@ function normalizeUpdateMode(value) {
   return UPDATE_MODES.includes(mode) ? mode : 'idle';
 }
 
-function normalizeOpacity(value) {
-  const opacity = Number(value ?? DEFAULT_OPACITY);
-  return Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : DEFAULT_OPACITY;
-}
 // A stored size is snapped back to the card's shape, within the allowed
 // range, so a window saved before the shape was enforced still fits.
 function normalizeSize(width) {
@@ -221,7 +213,6 @@ function loadSettings() {
     return {
       ...defaults(),
       ...parsed,
-      opacity: normalizeOpacity(parsed.opacity),
       width: size.width,
       height: size.height,
       usagePeriod: enabledPeriods.includes(usagePeriod) ? usagePeriod : enabledPeriods[0],
@@ -376,10 +367,6 @@ function createWindow() {
     },
   });
   frame = { ...frame, compact, cardHeight: height - 32, windowHeight: height };
-  if (MATERIAL.kind === 'blur') {
-    try { windowSurface = (shellRuntime?.attachBlur || require('../shell/windows-blur.cjs').attachBlur)(win); }
-    catch (error) { activeMaterial = 'none'; log(`background blur: ${error.message}`); }
-  }
 
   win.setMenuBarVisibility(false);
   if (IS_MAC) {
@@ -428,7 +415,7 @@ function createWindow() {
     refreshTrayMenu();
   });
 
-  win.on('show', () => { refreshTrayMenu(); setImmediate(refreshWindowMaterial); });
+  win.on('show', () => { refreshTrayMenu(); });
   win.on('hide', () => {
     setQuickMenuOpen(false);
     if (settingsOpen) closeSettingsPanel();
@@ -438,7 +425,6 @@ function createWindow() {
   });
   win.on('blur', () => {
     setQuickMenuOpen(false);
-    setImmediate(refreshWindowMaterial);
   });
 
   win.webContents.on('did-start-loading', () => {
@@ -457,18 +443,10 @@ function createWindow() {
   });
 }
 
-function refreshWindowMaterial() {
-  if (!windowSurface || !win || win.isDestroyed() || !win.isVisible()) return;
-  try { windowSurface.refresh(); }
-  catch (error) { log(`background blur refresh: ${error.message}`); }
-}
-
 function publicSettings() {
   return {
     maskAccounts: settings.maskAccounts,
     topmost: settings.topmost,
-    opacity: settings.opacity,
-    backgroundMaterial: activeMaterial,
     gateway: displayAddress(resolveGateway()),
     keepAlive: settings.keepAlive !== false,
     updateMode: settings.updateMode,
@@ -1529,12 +1507,6 @@ function refreshTrayMenu() {
 
 function buildTrayMenu() {
   const visible = Boolean(win && win.isVisible());
-  const opacityItems = [0, 25, 50, 75, 100].map((percent) => ({
-    label: percent === 0 ? '0%（最透明）' : percent === 100 ? '100%（最不透明）' : `${percent}%`,
-    type: 'radio',
-    checked: Math.abs(settings.opacity - percent / 100) < 0.01,
-    click: () => setOpacity(percent / 100),
-  }));
 
   return Menu.buildFromTemplate([
     {
@@ -1586,10 +1558,6 @@ function buildTrayMenu() {
         send('magpie:settings', publicSettings());
         refreshTrayMenu();
       },
-    },
-    {
-      label: '背景不透明度',
-      submenu: opacityItems,
     },
     { type: 'separator' },
     {
@@ -1675,15 +1643,6 @@ function createTray() {
     });
     tray.on('double-click', toggleVisible);
   }
-}
-
-function setOpacity(value) {
-  const next = { ...settings, opacity: normalizeOpacity(value) };
-  const saved = saveSettings(next);
-  if (!saved.ok) { send('magpie:action-error', saved.error); return; }
-  settings = next;
-  send('magpie:settings', publicSettings());
-  refreshTrayMenu();
 }
 
 function quit() {
@@ -1781,7 +1740,6 @@ ipcMain.handle('settings:save', (_event, input) => {
       ...settings,
       topmost: Boolean(data.topmost),
       maskAccounts: Boolean(data.maskAccounts),
-      opacity: normalizeOpacity(data.opacity),
       gateway: nextGateway,
       width,
       height,
@@ -1874,12 +1832,6 @@ ipcMain.on('settings:open-file', () => {
 ipcMain.on('settings:close', () => closeSettingsPanel());
 ipcMain.handle('gateway:test', (_event, raw) => testGateway(raw));
 ipcMain.handle('window:reset', () => resetPlacement());
-
-// While the slider is dragged the window follows it at once; nothing is
-// written until Save, and closing the panel puts the stored value back.
-ipcMain.on('settings:opacity', (_event, value) => {
-  send('magpie:surface-opacity', normalizeOpacity(value));
-});
 
 ipcMain.on('busy:ready', () => {
   rendererReady = true;

@@ -31,7 +31,7 @@ test('groups by the serving provider, newest group first', () => {
     route(1, { provider: 'officeace' }),
     route(5, { provider: 'workbuddy', order: [{ id: 'acct5', provider: 'workbuddy', name: 'WorkBuddy', kind: 'account', who: 'w5', model: 'm5' }] }),
   ]);
-  assert.deepEqual(groups.map(g => g.provider), ['workbuddy', 'officeace']);
+  assert.deepEqual(groups.map(g => g.provider), ['WorkBuddy', 'OfficeAce']);
   assert.equal(groups[0].key, 'workbuddy');
 });
 
@@ -40,7 +40,7 @@ test('the seat provider wins over the route provider', () => {
     route(1, { provider: 'officeace', order: [{ id: 'acct1', provider: 'workbuddy', name: 'WorkBuddy', kind: 'account', who: 'w', model: 'm1' }] }),
   ]);
   assert.equal(groups[0].key, 'workbuddy');
-  assert.equal(groups[0].provider, 'workbuddy');
+  assert.equal(groups[0].provider, 'WorkBuddy');
 });
 
 test('a route with no provider falls into the magpie group', () => {

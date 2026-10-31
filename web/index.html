@@ -72,15 +72,8 @@
           </div>
         </header>
 
-        <section class="model-list" id="modelList" aria-label="按实际服务模型分组的最近会话">
-          <div class="model-head mono">
-            <span class="col-model">模型</span>
-            <span class="col-state">状态</span>
-            <span class="col-ms">时长</span>
-            <span class="col-ttft">首字</span>
-            <span class="col-speed">tok/s</span>
-          </div>
-          <div class="model-rows" id="modelRows"></div>
+        <section class="model-list" id="modelList" aria-label="按服务供应商分组的模型会话">
+          <div class="provider-groups" id="providerGroups"></div>
           <p class="model-empty" id="modelEmpty" hidden>等待 magpie 数据</p>
           <p class="model-hidden mono" id="modelHidden" hidden></p>
         </section>
@@ -120,11 +113,6 @@
                         <span><b>隐藏账号名称</b></span>
                         <input type="checkbox" id="settingsMask">
                       </label>
-                    </div>
-                    <div class="settings-opacity">
-                      <span title="数值越低，背景越透明；文字、按钮和设置页面保持清晰"><b>背景不透明度</b></span>
-                      <input type="range" id="settingsOpacity" min="0" max="100" step="1" value="30">
-                      <output id="settingsOpacityOut">30%</output>
                     </div>
                     <label class="settings-switch"><span><b>紧凑模式</b></span><input type="checkbox" id="settingsCompact"></label>
                     <label class="settings-switch"><span><b>安静模式</b></span><input type="checkbox" id="settingsQuiet"></label>

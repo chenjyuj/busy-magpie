@@ -173,7 +173,7 @@ function electronDriver() {
   ipcMain.once('busy:ready', async event => {
     contents = event.sender;
     try {
-      const state = await contents.executeJavaScript(`window.busy.bootstrap().then(data=>({version:data.version,shellVersion:data.update.shellVersion,opacity:data.settings.opacity,versionText:document.getElementById('appVersionText').textContent,guide:!!document.getElementById('firstRunMask'),url:location.href}))`);
+      const state = await contents.executeJavaScript(`window.busy.bootstrap().then(data=>({version:data.version,shellVersion:data.update.shellVersion,showTiming:data.settings.showTiming,versionText:document.getElementById('appVersionText').textContent,guide:!!document.getElementById('firstRunMask'),url:location.href}))`);
       write('ready-' + process.pid, {pid: process.pid, state, errors, runtime: runtime()});
     } catch (error) { write('driver-error-' + process.pid, {error: error.stack}); }
   });
@@ -196,11 +196,11 @@ function electronDriver() {
         const state = await contents.executeJavaScript('window.busy.updatesInstall()');
         write('command-' + command.id, {state, pid: process.pid});
       } else if (command.action === 'save') {
-        const opacity = JSON.stringify(command.opacity);
-        const result = await contents.executeJavaScript(`window.busy.settingsGet().then(current=>window.busy.settingsSave({...current.settings,opacity:${opacity}}))`);
+        const showTiming = JSON.stringify(command.showTiming);
+        const result = await contents.executeJavaScript(`window.busy.settingsGet().then(current=>window.busy.settingsSave({...current.settings,showTiming:${showTiming}}))`);
         write('command-' + command.id, {result, pid: process.pid});
       } else if (command.action === 'inspect') {
-        const state = await contents.executeJavaScript(`window.busy.bootstrap().then(data=>({version:data.version,shellVersion:data.update.shellVersion,opacity:data.settings.opacity,versionText:document.getElementById('appVersionText').textContent,guide:!!document.getElementById('firstRunMask'),url:location.href}))`);
+        const state = await contents.executeJavaScript(`window.busy.bootstrap().then(data=>({version:data.version,shellVersion:data.update.shellVersion,showTiming:data.settings.showTiming,versionText:document.getElementById('appVersionText').textContent,guide:!!document.getElementById('firstRunMask'),url:location.href}))`);
         write('command-' + command.id, {state, pid: process.pid, errors, runtime: runtime()});
       } else if (command.action === 'exit') {
         write('command-' + command.id, {exiting: true, pid: process.pid});
@@ -362,7 +362,7 @@ function createExternalController() {
   let renderer;
   const errors = [];
   let mainPort;
-  const stateExpression = `window.busy?.bootstrap().then(data=>({version:data.version,shellVersion:data.update.shellVersion,opacity:data.settings.opacity,versionText:document.getElementById('appVersionText')?.textContent,guide:!!document.getElementById('firstRunMask'),url:location.href,complete:document.readyState==='complete'}))`;
+  const stateExpression = `window.busy?.bootstrap().then(data=>({version:data.version,shellVersion:data.update.shellVersion,showTiming:data.settings.showTiming,versionText:document.getElementById('appVersionText')?.textContent,guide:!!document.getElementById('firstRunMask'),url:location.href,complete:document.readyState==='complete'}))`;
   async function mainSnapshot(url) {
     const connection = await inspectorConnection(url);
     try {
@@ -449,7 +449,7 @@ function createExternalController() {
       assert.equal(current?.pid, pid);
       if (action === 'check') return {pid, state: await renderer.evaluate('window.busy.updatesCheck()')};
       if (action === 'try-install') return {pid, state: await renderer.evaluate('window.busy.updatesInstall()')};
-      if (action === 'save') return {pid, result: await renderer.evaluate(`window.busy.settingsGet().then(current=>window.busy.settingsSave({...current.settings,opacity:${JSON.stringify(extra.opacity)}}))`)};
+      if (action === 'save') return {pid, result: await renderer.evaluate(`window.busy.settingsGet().then(current=>window.busy.settingsSave({...current.settings,showTiming:${JSON.stringify(extra.showTiming)}}))`)};
       if (action === 'inspect') return {pid, state: await renderer.evaluate(stateExpression), runtime: current.runtime, errors: [...errors]};
       if (action === 'install') {
         await renderer.evaluate('window.busy.updatesInstall(); "accepted"', false);
@@ -524,7 +524,7 @@ const path = require('node:path');
 const {app} = require('electron');
 const filename = path.join(app.getPath('userData'), 'settings.json');
 const settings = JSON.parse(fs.readFileSync(filename, 'utf8'));
-fs.writeFileSync(filename, JSON.stringify({...settings, opacity:0.91, failedMigration:'isolated-e2e'}));
+fs.writeFileSync(filename, JSON.stringify({...settings, showTiming:false, failedMigration:'isolated-e2e'}));
 throw new Error('isolated-e2e candidate failed before renderer startup');
 `));
     const manifest = createManifest({version, keyId: overrides.keyId || keyId, files: payloadFiles,
@@ -594,15 +594,15 @@ throw new Error('isolated-e2e candidate failed before renderer startup');
   assert.equal(original.runtime.isPackaged, packaged);
   assert.equal(original.runtime.appPath, appRoot);
   assert.equal(original.runtime.executable, electron);
-  assert.equal(original.state.opacity, 0.3);
+  assert.equal(original.state.showTiming, true);
   assert.equal(original.state.guide, false);
   assert.match(original.state.versionText, /v1\.4\.0/);
   assert.deepEqual(original.errors, []);
-  record('real builtin renderer starts at v1.4.0 with 30% opacity and no guide');
+  record('real builtin renderer starts at v1.4.0 with timing shown and no guide');
   if (packaged) record('packaged runtime starts without an app-directory argument and resolves runtime dependencies inside its own app');
-  const saved = await command(original.pid, 'save', {opacity: 0.42});
+  const saved = await command(original.pid, 'save', {showTiming: false});
   assert.equal(saved.result.ok, true);
-  assert.equal(readJson(path.join(profile, 'settings.json')).opacity, 0.42);
+  assert.equal(readJson(path.join(profile, 'settings.json')).showTiming, false);
   const checked = await command(original.pid, 'check');
   assert.equal(checked.state.latest, '1.4.1');
   assert.equal(checked.state.kind, 'business');
@@ -621,7 +621,7 @@ throw new Error('isolated-e2e candidate failed before renderer startup');
   assert.equal(journal().previous, null);
   assert.deepEqual(journal().failures, []);
   assert.equal(upgraded.state.shellVersion, '1.4.0');
-  assert.equal(upgraded.state.opacity, 0.42);
+  assert.equal(upgraded.state.showTiming, false);
   assert.match(upgraded.state.versionText, /v1\.4\.1/);
   assert.ok(upgraded.state.url.includes(success.descriptor.id));
   assert.deepEqual(upgraded.errors, []);
@@ -657,7 +657,7 @@ throw new Error('isolated-e2e candidate failed before renderer startup');
   shutdownObservations.push(stoppedBusiness(candidate.pid, failedRecord.token, candidate.startedAt ?? Date.parse(candidate.at)));
   assert.equal(alive(restored.pid), true);
   const restoredState = await command(restored.pid, 'inspect');
-  assert.equal(restoredState.state.opacity, 0.42);
+  assert.equal(restoredState.state.showTiming, false);
   assert.equal(restoredState.state.version, '1.4.1');
   assert.equal(restoredState.state.shellVersion, '1.4.0');
   assert.match(restoredState.state.versionText, /v1\.4\.1/);
@@ -668,7 +668,7 @@ throw new Error('isolated-e2e candidate failed before renderer startup');
   const transaction = path.join(updateRoot, 'transactions', failedRecord.token);
   assert.deepEqual(fs.readFileSync(path.join(transaction, 'settings.json')), baselineSettings);
   const badSettings = readJson(path.join(transaction, 'failed-settings.json'));
-  assert.equal(badSettings.opacity, 0.91);
+  assert.equal(badSettings.showTiming, false);
   assert.equal(badSettings.failedMigration, 'isolated-e2e');
   assert.deepEqual(fs.readFileSync(path.join(profile, 'settings.json')), baselineSettings);
   assert.ok(events().some(entry => entry.token === failedRecord.token && entry.event === 'settings-restored'));
@@ -710,7 +710,7 @@ throw new Error('isolated-e2e candidate failed before renderer startup');
     assert.deepEqual(fs.readFileSync(path.join(profile, 'settings.json')), baselineSettings);
     const stillRunning = await command(restored.pid, 'inspect');
     assert.equal(stillRunning.state.version, '1.4.1');
-    assert.equal(stillRunning.state.opacity, 0.42);
+    assert.equal(stillRunning.state.showTiming, false);
     assert.equal(fs.existsSync(path.join(profile, 'updating')), false);
     rejected.push({name, error: refused.state.error, pid: restored.pid});
     record(name + ' is rejected before any new process or settings change');
@@ -731,7 +731,7 @@ throw new Error('isolated-e2e candidate failed before renderer startup');
   assert.deepEqual(journal().previous, success.descriptor);
   assert.deepEqual(journal().failures, failedState.failures);
   assert.equal(recovered.state.version, '1.4.3');
-  assert.equal(recovered.state.opacity, 0.42);
+  assert.equal(recovered.state.showTiming, false);
   assert.equal(recovered.state.shellVersion, '1.4.0');
   assert.match(recovered.state.versionText, /v1\.4\.3/);
   assert.deepEqual(recovered.errors, []);
@@ -753,7 +753,7 @@ throw new Error('isolated-e2e candidate failed before renderer startup');
   child = launchApplication();
   const relaunched = await ready('1.4.3', [recovered.pid]);
   assert.equal(relaunched.pid, child.pid);
-  assert.equal(relaunched.state.opacity, 0.42);
+  assert.equal(relaunched.state.showTiming, false);
   assert.equal(relaunched.state.shellVersion, '1.4.0');
   assert.match(relaunched.state.versionText, /v1\.4\.3/);
   assert.deepEqual(relaunched.errors, []);

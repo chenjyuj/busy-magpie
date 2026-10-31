@@ -11,13 +11,11 @@ assert.ok(start >= 0 && end > start, 'load the actual renderer settings panel');
 const setup = source.slice(start, end);
 const flush = () => new Promise(setImmediate);
 
-function panelHarness(savedOpacity = 1) {
+function panelHarness() {
   const elements = new Map();
   const loads = [];
-  const previews = [];
-  const restorations = [];
+  const saves = [];
   let onPanel;
-  let surface = savedOpacity;
   const element = (id) => {
     if (!elements.has(id)) {
       elements.set(id, {
@@ -29,20 +27,32 @@ function panelHarness(savedOpacity = 1) {
     }
     return elements.get(id);
   };
-  const settings = { opacity: savedOpacity };
+  // The save path reads the chip groups; give it one chip each so it can.
+  const chip = (dataset) => ({
+    dataset,
+    getAttribute: (name) => (name === 'aria-pressed' ? 'true' : null),
+    setAttribute() {},
+    addEventListener() {},
+  });
+  const querySelectorAll = (selector) => {
+    if (selector.includes('settingsUpdate')) return [chip({ update: 'idle' })];
+    if (selector.includes('settingsPeriods')) return [chip({ period: 'today' })];
+    if (selector.includes('settingsMetrics')) return [chip({ metric: 'total' })];
+    return [];
+  };
   const context = {
-    $: element, settings, USAGE_PERIODS: ['today'], aboutRefresh: null,
+    $: element, settings: {}, USAGE_PERIODS: ['today'], aboutRefresh: null,
+    activePeriod: () => 'today', pressChips: () => {},
     connection: { online: true }, usageStatus: {}, usageData: null,
-    applySurface(value) { surface = value; restorations.push(value); },
     document: {
-      querySelectorAll: () => [],
+      querySelectorAll,
       body: { classList: { add() {}, remove() {} } },
     },
     window: {
       clearTimeout() {}, setTimeout() {}, addEventListener() {},
       busy: {
         settingsGet: () => new Promise((resolve) => loads.push(resolve)),
-        previewOpacity(value) { surface = value; previews.push(value); },
+        settingsSave: (payload) => { saves.push(payload); return Promise.resolve({ ok: true, version: 'test', settings: {}, path: '' }); },
         onSettingsPanel(handler) { onPanel = handler; },
       },
     },
@@ -50,76 +60,36 @@ function panelHarness(savedOpacity = 1) {
   vm.createContext(context);
   vm.runInContext(`${setup}\nsetupSettingsPanel();`, context);
   return {
-    element, settings, previews, restorations,
-    surface: () => surface,
+    element, saves,
     open() { onPanel({ open: true, mode: 'settings' }); },
     close() { onPanel({ open: false }); },
-    input(percent) {
-      element('settingsOpacity').value = String(percent);
-      element('settingsOpacity').handlers.input();
-    },
     async resolveLoad(index, values = {}) {
-      loads[index]({ settings: { opacity: savedOpacity, ...values }, version: 'test' });
+      loads[index]({ settings: { ...values }, version: 'test', path: '' });
       await flush();
       assert.equal(element('settingsStatus').textContent, '');
     },
   };
 }
 
-test('closing after load and preview restores saved background synchronously', async () => {
-  const h = panelHarness(0.75);
-  h.open();
-  await h.resolveLoad(0);
-  h.input(0);
-  assert.equal(h.surface(), 0);
-  h.close();
-  assert.equal(h.surface(), 0.75);
-  assert.deepEqual(h.previews, [0]);
-  assert.deepEqual(h.restorations, [0.75]);
-});
-
-test('a settings reply arriving after slider input preserves the draft and cancellation', async () => {
-  const h = panelHarness(0.75);
-  h.open();
-  h.input(0);
-  await h.resolveLoad(0);
-  assert.equal(h.element('settingsOpacity').value, '0');
-  assert.equal(h.element('settingsOpacityOut').textContent, '0%');
-  assert.equal(h.surface(), 0);
-  h.close();
-  assert.equal(h.surface(), 0.75);
-  assert.deepEqual(h.restorations, [0.75]);
-});
-
-test('cancellation uses the current saved opacity including zero', async () => {
-  const h = panelHarness(0.6);
-  h.open();
-  await h.resolveLoad(0);
-  h.input(80);
-  h.settings.opacity = 0;
-  h.close();
-  assert.equal(h.surface(), 0);
-  assert.deepEqual(h.restorations, [0]);
-});
-
-test('a settings reply after closing cannot overwrite the cancelled draft', async () => {
-  const h = panelHarness(0.8);
-  h.open();
-  h.input(15);
-  h.close();
-  assert.equal(h.surface(), 0.8);
-  await h.resolveLoad(0);
-  assert.equal(h.element('settingsOpacity').value, '15');
-  assert.equal(h.surface(), 0.8);
-});
-
 test('a reply from an earlier opening cannot overwrite the current settings form', async () => {
   const h = panelHarness();
   h.open();
   h.close();
   h.open();
-  await h.resolveLoad(1, { opacity: 0.6, gateway: 'new-gateway' });
-  await h.resolveLoad(0, { opacity: 0.2, gateway: 'old-gateway' });
-  assert.equal(h.element('settingsOpacity').value, '60');
+  await h.resolveLoad(1, { gateway: 'new-gateway' });
+  await h.resolveLoad(0, { gateway: 'old-gateway' });
   assert.equal(h.element('settingsGateway').value, 'new-gateway');
+});
+
+test('saving the settings sends no opacity, which the opaque card no longer has', async () => {
+  const h = panelHarness();
+  h.open();
+  await h.resolveLoad(0, { gateway: '127.0.0.1:3425', maskAccounts: true, topmost: true });
+  h.element('settingsGateway').value = '127.0.0.1:3500';
+  h.element('settingsForm').handlers.submit({ preventDefault() {} });
+  await flush();
+  await flush();
+  assert.equal(h.saves.length, 1);
+  assert.equal(Object.hasOwn(h.saves[0], 'opacity'), false);
+  assert.equal(h.saves[0].gateway, '127.0.0.1:3500');
 });

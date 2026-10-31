@@ -80,7 +80,7 @@ export function providerSessionGroups(routes, { limit = 6 } = {}) {
 
     let group = groups.get(key);
     if (!group) {
-      group = { key, provider: key, account: '', quota: null, at: route.time, models: [] };
+      group = { key, provider: '', account: '', quota: null, at: route.time, models: [] };
       groups.set(key, group);
     }
     // The group remembers the provider's most recent seat: its account and
@@ -88,6 +88,7 @@ export function providerSessionGroups(routes, { limit = 6 } = {}) {
     // so only the first one seen for a group gets to say.
     if (!group.seen) {
       group.seen = true;
+      group.provider = String(seat?.name || '').trim();
       group.account = String(seat?.who || '');
       group.quota = quotaOf(seat);
       group.at = route.time;
@@ -100,6 +101,8 @@ export function providerSessionGroups(routes, { limit = 6 } = {}) {
       // Older routes only contribute completed metrics below.
       row = {
         model,
+        provider: String(seat?.provider || route.provider || ''),
+        account: String(seat?.who || ''),
         ms: null, ttft: null, speed: null,
         status: statusOf(route),
         reroutes: rerouteCount(route.tries),
@@ -122,7 +125,7 @@ export function providerSessionGroups(routes, { limit = 6 } = {}) {
 
   const ordered = [...groups.values()].map(({ seen, ...group }) => ({
     ...group,
-    provider: group.key,
+    provider: group.provider || group.key,
     models: group.models
       .map(({ metricsSeen, ...row }) => row)
       .sort((a, b) => timestamp(b.at) - timestamp(a.at)),

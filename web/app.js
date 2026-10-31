@@ -2,12 +2,11 @@ import {
   formatDuration,
   formatTokens,
   mask,
-  providerName,
 } from './presenter.js';
 import { brandKey, brandMark } from './brand-icons.mjs';
 import { downloadSize } from './download-progress.mjs';
 import { redactDiagnostic } from './redact.mjs';
-import { modelSessionRows } from './model-sessions.mjs';
+import { providerSessionGroups } from './model-sessions.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -21,13 +20,12 @@ const el = {
   tokenPill: $('tokenPill'),
   tokenTotal: $('tokenTotal'),
   tokenWindow: $('tokenWindow'),
-  modelRows: $('modelRows'),
+  providerGroups: $('providerGroups'),
   modelEmpty: $('modelEmpty'),
   modelHidden: $('modelHidden'),
 };
 
 let settings = {
-  opacity: 0.3,
   maskAccounts: true,
   gateway: '127.0.0.1:3425',
   usagePeriod: '30d',
@@ -547,8 +545,6 @@ function setupSettingsPanel() {
   const topmost = $('settingsTopmost');
   const mask = $('settingsMask');
   const updateChips = [...document.querySelectorAll('#settingsUpdate .settings-chip')];
-  const opacity = $('settingsOpacity');
-  const opacityOut = $('settingsOpacityOut');
   const gateway = $('settingsGateway');
   const periodChips = [...document.querySelectorAll('#settingsPeriods .settings-chip')];
   const metricChips = [...document.querySelectorAll('#settingsMetrics .settings-chip')];
@@ -564,7 +560,6 @@ function setupSettingsPanel() {
   let busy = false;
   let closeTimer = 0;
   let loadGeneration = 0;
-  let opacityEdited = false;
   let gatewayReport = '';
 
   const setStatus = (text, error = false) => {
@@ -630,7 +625,7 @@ function setupSettingsPanel() {
     });
   }
 
-  const fill = (data, preserveOpacity = false) => {
+  const fill = (data) => {
     const s = data.settings || {};
     topmost.checked = Boolean(s.topmost);
     mask.checked = Boolean(s.maskAccounts);
@@ -644,13 +639,6 @@ function setupSettingsPanel() {
     keepAlive.checked = s.keepAlive !== false;
     $('settingsCompact').checked = Boolean(s.compact);
     $('settingsQuiet').checked = Boolean(s.quietMotion);
-    if (!preserveOpacity || !opacityEdited) {
-      const storedOpacity = Number(s.opacity ?? 0.3);
-      const value = Number.isFinite(storedOpacity) ? Math.min(1, Math.max(0, storedOpacity)) : 0.3;
-      opacity.value = String(Math.round(value * 100));
-      opacityOut.textContent = `${opacity.value}%`;
-      opacityEdited = false;
-    }
     gateway.value = s.gateway || '';
     gateway.placeholder = '留空自动检测';
     gatewayReport = `Busy Magpie v${data.version}\n网关：${data.resolvedGateway || '未解析'}\n来源：${data.gatewaySource || '自动检测'}\n路由：${connection.online ? '可读取' : connection.detail}\n用量：${usageStatus.error || (usageData ? '可读取' : '尚未读取')}`;
@@ -665,7 +653,7 @@ function setupSettingsPanel() {
     try {
       const data = await window.busy.settingsGet();
       if (!open || generation !== loadGeneration) return;
-      fill(data, true);
+      fill(data);
       setStatus('');
     } catch (error) {
       if (!open || generation !== loadGeneration) return;
@@ -677,7 +665,6 @@ function setupSettingsPanel() {
     if (!open) return;
     open = false;
     loadGeneration++;
-    applySurface(settings.opacity);
     document.body.classList.add('settings-closing');
     closeTimer = window.setTimeout(() => {
       pane.hidden = true;
@@ -690,7 +677,6 @@ function setupSettingsPanel() {
   const show = (data) => {
     window.clearTimeout(closeTimer);
     loadGeneration++;
-    opacityEdited = false;
     open = true;
     document.body.classList.remove('settings-closing');
     pane.hidden = false;
@@ -708,12 +694,6 @@ function setupSettingsPanel() {
     else load();
   };
 
-  opacity.addEventListener('input', () => {
-    opacityEdited = true;
-    opacityOut.textContent = `${opacity.value}%`;
-    window.busy.previewOpacity?.(Number(opacity.value) / 100);
-  });
-
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (busy) return;
@@ -724,7 +704,6 @@ function setupSettingsPanel() {
       const result = await window.busy.settingsSave({
         topmost: topmost.checked,
         maskAccounts: mask.checked,
-        opacity: Number(opacity.value) / 100,
         updateMode: (updateChips.find((chip) => chip.getAttribute('aria-pressed') === 'true')
           || updateChips[0]).dataset.update,
         gateway: gateway.value.trim(),
@@ -1000,10 +979,11 @@ function applyGateway() {
 }
 
 
-// ── the model list ─────────────────────────────────────────────────────
-// The card's whole view: one row for each model that served a request, each
-// showing that model's most recent session. The routing stage, its wires and
-// its flying magpies are gone; only what a model actually did is left.
+// ── the provider-grouped model list ────────────────────────────────────────
+// The card's whole view: one group per serving provider, a grey group head
+// (display name + allowance bar) over white rows for each model that
+// provider carried. A live request only flips the status — the row keeps the
+// numbers of the last request that finished.
 
 const ROW_LIMIT = 6;
 const STATE_WORDS = { error: '错误', live: '进行中', ok: '完成' };
@@ -1023,15 +1003,58 @@ function relativeTime(iso) {
   return `${Math.round(hours / 24)}d 前`;
 }
 
-// What the row says on hover: who served it, when, and how it got here.
+// What the group head's hover says: how much is left and when it renews.
+// "0001-01-01" is magpie's marker for a vendor that never told it.
+function quotaTip(quota) {
+  const bits = [];
+  if (quota.amount && quota.limit) {
+    bits.push(`已用 ${Math.round(quota.amount).toLocaleString('zh-CN')} / ${Math.round(quota.limit).toLocaleString('zh-CN')}${quota.unit ? ` ${quota.unit}` : ''}`);
+  }
+  if (quota.renewAt && !quota.renewAt.startsWith('0001-')) {
+    const when = new Date(quota.renewAt);
+    if (!Number.isNaN(when.getTime())) bits.push(`${when.getMonth() + 1}/${when.getDate()} 续期`);
+  }
+  return bits.length ? `额度：${bits.join(' · ')}` : '';
+}
+
+// The provider's allowance as a horizontal bar on the group head. A bar is
+// only drawn when the vendor actually reports the number.
+function quotaBarNode(quota) {
+  const wrap = create('span', 'provider-quota');
+  const remaining = Math.max(0, Math.min(100, quota.remaining));
+  wrap.append(create('span', 'provider-left', `剩余 ${Math.round(remaining)}%`));
+  const bar = create('span', 'provider-bar');
+  const fill = create('i');
+  if (remaining < 20) fill.className = 'low';
+  else if (remaining < 50) fill.className = 'mid';
+  fill.style.width = `${Math.max(1.5, remaining).toFixed(1)}%`;
+  bar.append(fill);
+  wrap.append(bar);
+  const tip = quotaTip(quota);
+  if (tip) wrap.title = tip;
+  return wrap;
+}
+
+function providerGroupNode(group) {
+  const node = create('div', 'provider-group');
+  node.dataset.provider = group.key;
+  const head = create('div', 'provider-head');
+  head.append(create('b', '', group.provider));
+  if (group.quota) head.append(quotaBarNode(group.quota));
+  node.append(head);
+  for (const row of group.models) node.append(modelRowNode(row));
+  return node;
+}
+
+// What the row says on hover: the account and how the request got here. The
+// provider is already on the group head.
 function rowTip(row) {
   const bits = [];
-  const provider = providerName('', row.provider);
-  if (provider) bits.push(provider);
   if (row.account) bits.push(settings.maskAccounts ? mask(row.account) : row.account);
   const when = relativeTime(row.at);
   if (when) bits.push(`最近活动 ${when}`);
   if (row.reroutes > 0) bits.push(`改道 ${row.reroutes} 次`);
+  if (row.speed !== null) bits.push(`${Math.round(row.speed)} tok/s`);
   return bits.join(' · ');
 }
 
@@ -1041,35 +1064,32 @@ function modelRowNode(row) {
   node.dataset.status = row.status;
 
   const name = create('span', 'col-model');
+  name.append(create('i', `status-dot ${row.status === 'error' ? 'bad' : row.status === 'live' ? 'accent' : 'good'}`));
   name.append(create('b', 'model-name', row.model));
   if (row.reroutes > 0) name.append(create('i', 'row-reroute mono', `改道 ${row.reroutes} 次`));
-
-  const state = create('span', 'col-state');
-  state.append(create('i', `status-dot ${row.status === 'error' ? 'bad' : row.status === 'live' ? 'accent' : 'good'}`));
-  state.append(create('span', 'state-word', STATE_WORDS[row.status] || '完成'));
 
   // 耗时拆解 still means what it always did: show the measured timing, or a
   // dash when magpie did not report one.
   const timing = settings.showTiming !== false;
   node.append(
     name,
-    state,
     create('span', 'col-ms mono', timing ? formatDuration(row.ms) : '—'),
     create('span', 'col-ttft mono', timing ? formatLatency(row.ttft) : '—'),
     create('span', 'col-speed mono', timing && row.speed !== null ? `${Math.round(row.speed)} tok/s` : '—'),
+    create('span', 'state-word', STATE_WORDS[row.status] || '完成'),
   );
   const tip = rowTip(row);
   if (tip) node.title = tip;
   return node;
 }
 
-function renderModelList(rows, hiddenCount) {
-  rowsShown = rows.length;
-  el.modelRows.textContent = '';
+function renderProviderGroups(groups, hiddenCount) {
+  rowsShown = groups.reduce((n, group) => n + group.models.length, 0);
+  el.providerGroups.textContent = '';
   const fragment = document.createDocumentFragment();
-  for (const row of rows) fragment.append(modelRowNode(row));
-  el.modelRows.append(fragment);
-  el.modelEmpty.hidden = rows.length > 0;
+  for (const group of groups) fragment.append(providerGroupNode(group));
+  el.providerGroups.append(fragment);
+  el.modelEmpty.hidden = rowsShown > 0;
   el.modelHidden.hidden = hiddenCount <= 0;
   el.modelHidden.textContent = hiddenCount > 0 ? `+${hiddenCount} 个模型` : '';
 }
@@ -1080,9 +1100,8 @@ function render() {
   const online = Boolean(connection.online && lastTrace);
   if (online) {
     document.body.classList.remove('stale');
-    el.modelEmpty.hidden = true;
-    const { rows, hiddenCount } = modelSessionRows(routes, { limit: ROW_LIMIT });
-    renderModelList(rows, hiddenCount);
+    const { groups, hiddenCount } = providerSessionGroups(routes, { limit: ROW_LIMIT });
+    renderProviderGroups(groups, hiddenCount);
   } else {
     // A dropped gateway keeps the last frame on screen and labels it stale
     // rather than blanking a list the user is reading.
@@ -1103,22 +1122,8 @@ function setLayout(on) {
   if (layout) document.activeElement?.blur();
 }
 
-function applySurface(value = settings.opacity) {
-  const native = settings.backgroundMaterial && settings.backgroundMaterial !== 'none';
-  const opacity = value !== null && value !== '' && Number.isFinite(Number(value))
-    ? Math.min(1, Math.max(0, Number(value))) : 0.3;
-  document.body.classList.toggle('native-material', Boolean(native));
-  const style = document.documentElement.style;
-  style.setProperty('--surface-alpha', String(opacity));
-  style.setProperty('--content-alpha', String(opacity * 0.24));
-  style.setProperty('--surface-glow', String(opacity * 0.1));
-  style.setProperty('--panel-alpha', '0.86');
-  style.setProperty('--popup-alpha', '0.94');
-}
-
 function applySettings(next) {
   settings = { ...settings, ...(next || {}) };
-  applySurface();
   document.body.classList.toggle('noanim', Boolean(settings.quietMotion));
   applyGateway();
   render();
@@ -1131,7 +1136,6 @@ async function boot() {
   const data = await window.busy.bootstrap();
   if (data.version) $('appVersionText').textContent = `v${data.version}${data.preview ? ' 预览' : ''}`;
   if (data.settings) settings = { ...settings, ...data.settings };
-  applySurface();
   document.body.classList.toggle('noanim', Boolean(settings.quietMotion));
   if (data.connection) connection = data.connection;
   if (data.trace) lastTrace = data.trace;
@@ -1155,7 +1159,6 @@ async function boot() {
   });
 
   window.busy.onSettings((next) => applySettings(next));
-  window.busy.onSurfaceOpacity((value) => applySurface(value));
   window.busy.onLayout((on) => setLayout(on));
   window.busy.onFrame((next) => applyFrame(next));
   window.busy.onUsage((next) => {
