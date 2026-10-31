@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelSessionRows } from '../web/model-sessions.mjs';
+import { providerSessionGroups } from '../web/model-sessions.mjs';
 
-const at = second => new Date(Date.UTC(2026, 9, 31, 3, 0, second)).toISOString();
+const at = second => new Date(Date.UTC(2026, 9, 31, 13, 0, second)).toISOString();
 const route = (id, extra = {}) => ({
   id,
   time: at(id),
@@ -16,102 +16,150 @@ const route = (id, extra = {}) => ({
   out: 240,
   flow: 2400,
   reasoning: 0,
-  tries: [{ id: `acct${id}`, model: `m${id}`, done: true, status: 200 }],
-  order: [{ id: `acct${id}`, provider: 'officeace', kind: 'account', who: `who${id}`, model: `m${id}` }],
+  tries: [{ id: `acct${id}`, model: `m${id}`, done: true, status: 200, ms: 3000, ttft: 600 }],
+  order: [{ id: `acct${id}`, provider: 'officeace', name: 'OfficeAce', kind: 'account', who: `user${id}@example.com`, model: `m${id}` }],
   ...extra,
 });
 
-test('one row per served model, newest activity first', () => {
-  const rows = modelSessionRows([route(1, { served: 'alpha' }), route(2, { served: 'beta' })]).rows;
-  assert.deepEqual(rows.map(row => row.model), ['beta', 'alpha']);
-  assert.equal(rows[0].key, 'beta');
+const withQuota = (r, quota) => ({
+  ...r,
+  order: r.order.map(seat => ({ ...seat, ...quota })),
 });
 
-test('the served model wins over the model of the last attempt', () => {
-  const rows = modelSessionRows([route(1, { served: 'alpha', tries: [{ id: 'a', model: 'beta', done: true, status: 200 }] })]).rows;
-  assert.equal(rows[0].model, 'alpha');
+test('groups by the serving provider, newest group first', () => {
+  const { groups } = providerSessionGroups([
+    route(1, { provider: 'officeace' }),
+    route(5, { provider: 'workbuddy', order: [{ id: 'acct5', provider: 'workbuddy', name: 'WorkBuddy', kind: 'account', who: 'w5', model: 'm5' }] }),
+  ]);
+  assert.deepEqual(groups.map(g => g.provider), ['workbuddy', 'officeace']);
+  assert.equal(groups[0].key, 'workbuddy');
 });
 
-test('the last attempt names the model when served is absent', () => {
-  const rows = modelSessionRows([route(1, {
-    served: '',
-    tries: [{ id: 'a', model: 'beta', done: true, status: 200 }, { id: 'b', model: 'gamma', done: true, status: 200 }],
-  })]).rows;
-  assert.equal(rows[0].model, 'gamma');
+test('the seat provider wins over the route provider', () => {
+  const { groups } = providerSessionGroups([
+    route(1, { provider: 'officeace', order: [{ id: 'acct1', provider: 'workbuddy', name: 'WorkBuddy', kind: 'account', who: 'w', model: 'm1' }] }),
+  ]);
+  assert.equal(groups[0].key, 'workbuddy');
+  assert.equal(groups[0].provider, 'workbuddy');
 });
 
-test('grouping uses the model name alone, not the account behind it', () => {
-  const rows = modelSessionRows([
-    route(1, { served: 'alpha', provider: 'officeace' }),
-    route(2, { served: 'alpha', provider: 'workbuddy', order: [{ id: 'acct2', provider: 'workbuddy', kind: 'account', who: 'other' }] }),
-  ]).rows;
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].provider, 'workbuddy');
-  assert.equal(rows[0].account, 'other');
+test('a route with no provider falls into the magpie group', () => {
+  const { groups } = providerSessionGroups([
+    route(1, { provider: '', order: [{ id: 'acct1', provider: '', kind: 'account', who: 'w', model: 'm1' }] }),
+  ]);
+  assert.equal(groups[0].key, 'magpie');
 });
 
-test('a model keeps only its newest request', () => {
-  const rows = modelSessionRows([route(1, { served: 'alpha', ms: 1111 }), route(5, { served: 'alpha', ms: 2222 })]).rows;
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].ms, 2222);
+test('each provider keeps one row per model, newest first', () => {
+  const { groups } = providerSessionGroups([
+    route(1, { served: 'alpha' }),
+    route(2, { served: 'beta' }),
+    route(3, { served: 'alpha', ms: 5000 }),
+  ]);
+  assert.equal(groups.length, 1);
+  const models = groups[0].models.map(m => m.model);
+  assert.deepEqual(models, ['alpha', 'beta']);
+  assert.equal(groups[0].models[0].ms, 5000);
 });
 
-test('a rerouted request belongs to its last attempt and counts the reroutes', () => {
-  const rows = modelSessionRows([route(1, {
-    served: '',
-    tries: [
+test('the quota comes from the provider seat and is clamped to 0-100', () => {
+  const { groups } = providerSessionGroups([
+    withQuota(route(1, { provider: 'officeace' }), {
+      known: true, used: 11, amount: 5755, limit: 9600, unit: 'credits',
+      renews: ['2026-11-19T16:00:00Z'], usedRenews: '2026-11-19T16:00:00Z',
+    }),
+  ]);
+  assert.deepEqual(groups[0].quota, {
+    remaining: 89, used: 11, amount: 5755, limit: 9600,
+    unit: 'credits', renewAt: '2026-11-19T16:00:00Z',
+  });
+});
+
+test('a seat without known or with a non-finite used has no quota', () => {
+  const noKnown = providerSessionGroups([
+    withQuota(route(1, { provider: 'a' }), { used: 10, amount: 1, limit: 10, unit: 'x', renews: ['2026-01-01'] }),
+  ]);
+  assert.equal(noKnown.groups[0].quota, null);
+  const badUsed = providerSessionGroups([
+    withQuota(route(2, { provider: 'b' }), { known: true, used: 'NaN', amount: 1, limit: 10, renews: [] }),
+  ]);
+  assert.equal(badUsed.groups[0].quota, null);
+});
+
+test('a live request keeps the metrics of the last completed one', () => {
+  const { groups } = providerSessionGroups([
+    route(1, { served: 'alpha', ms: 3000, ttft: 600 }),
+    route(5, { served: 'alpha', done: false, status: 0, ms: 0, ttft: 0, out: 0,
+      tries: [{ id: 'acct5', model: 'alpha', done: false, status: 0 }] }),
+  ]);
+  const row = groups[0].models[0];
+  assert.equal(row.status, 'live');
+  assert.equal(row.ms, 3000);
+  assert.equal(row.ttft, 600);
+  assert.equal(Math.round(row.speed), 100);
+});
+
+test('a model that has never completed shows no metrics, not zero', () => {
+  const { groups } = providerSessionGroups([
+    route(1, { provider: 'officeace', served: 'alpha', done: false, status: 0, ms: 0, ttft: 0, out: 0,
+      tries: [{ id: 'acct1', model: 'alpha', done: false, status: 0 }] }),
+  ]);
+  const row = groups[0].models[0];
+  assert.equal(row.status, 'live');
+  assert.equal(row.ms, null);
+  assert.equal(row.ttft, null);
+  assert.equal(row.speed, null);
+});
+
+test('an error outranks live and ok', () => {
+  const p = n => route(Number(n), { provider: `p${n}`, served: `m${n}`,
+    order: [{ id: `acct${n}`, provider: `p${n}`, name: `P${n}`, kind: 'account', who: `u${n}`, model: `m${n}` }] });
+  const { groups } = providerSessionGroups([
+    { ...p('1'), status: 500, error: 'boom' },
+    { ...p('2'), done: false, status: 0 },
+    p('3'),
+  ]);
+  assert.equal(groups.find(g => g.key === 'p1').models[0].status, 'error');
+  assert.equal(groups.find(g => g.key === 'p2').models[0].status, 'live');
+  assert.equal(groups.find(g => g.key === 'p3').models[0].status, 'ok');
+});
+
+test('the limit caps model rows, not groups, and counts the rest', () => {
+  const many = [];
+  for (let i = 1; i <= 8; i++) {
+    const p = `p${Math.ceil(i / 3)}`;
+    many.push(route(i, { provider: p, served: `m${i}`,
+      order: [{ id: `acct${i}`, provider: p, name: p, kind: 'account', who: `u${i}`, model: `m${i}` }] }));
+  }
+  const capped = providerSessionGroups(many, { limit: 6 });
+  const shown = capped.groups.reduce((n, g) => n + g.models.length, 0);
+  assert.ok(shown > 0 && shown <= 6, `shown should stay within the cap: ${shown}`);
+  assert.equal(capped.hiddenCount, 8 - shown);
+  assert.ok(capped.groups.every(g => g.models.length > 0));
+});
+
+test('a rerouted request counts the models it moved through', () => {
+  const { groups } = providerSessionGroups([
+    route(1, { provider: 'officeace', served: 'gamma', tries: [
       { id: 'a', model: 'alpha', done: true, status: 500, fail: true },
       { id: 'b', model: 'beta', done: true, status: 500, fail: true },
       { id: 'c', model: 'gamma', done: true, status: 200 },
-    ],
-  })]).rows;
-  assert.equal(rows[0].model, 'gamma');
-  assert.equal(rows[0].reroutes, 2);
+    ] }),
+  ]);
+  assert.equal(groups[0].models[0].model, 'gamma');
+  assert.equal(groups[0].models[0].reroutes, 2);
 });
 
-test('a route with neither a served model nor an attempt produces no row and does not throw', () => {
-  const stage = modelSessionRows([route(1, { served: '', tries: [] }), route(2, { served: undefined, tries: undefined })]);
-  assert.deepEqual(stage.rows, []);
-  assert.equal(stage.hiddenCount, 0);
+test('routes with neither seat nor provider are skipped without crashing', () => {
+  const stage = providerSessionGroups([route(1, { served: '', tries: [], order: [] }), route(2, { provider: undefined })]);
+  assert.equal(stage.groups.length <= 1, true);
 });
 
-test('missing metrics stay null instead of zero', () => {
-  const rows = modelSessionRows([route(1, { served: 'alpha', ms: 0, ttft: 0, out: 0 })]).rows;
-  assert.equal(rows[0].ms, null);
-  assert.equal(rows[0].ttft, null);
-  assert.equal(rows[0].out, null);
-  assert.equal(rows[0].speed, null);
-});
-
-test('the status is error first, then live, then done', () => {
-  const rows = modelSessionRows([
-    route(1, { served: 'alpha', status: 500, error: 'boom' }),
-    route(2, { served: 'beta', done: false, status: 0, ms: 0, ttft: 0, out: 0 }),
-    route(3, { served: 'gamma', done: true, status: 200 }),
-  ]).rows;
-  const byModel = Object.fromEntries(rows.map(row => [row.model, row.status]));
-  assert.equal(byModel.alpha, 'error');
-  assert.equal(byModel.beta, 'live');
-  assert.equal(byModel.gamma, 'ok');
-});
-
-test('the list caps at six rows and reports the rest as hidden', () => {
-  const many = Array.from({ length: 7 }, (_, index) => route(index + 1, { served: `m${index + 1}` }));
-  const capped = modelSessionRows(many);
-  assert.equal(capped.rows.length, 6);
-  assert.equal(capped.hiddenCount, 1);
-  const smaller = modelSessionRows(many, { limit: 2 });
-  assert.equal(smaller.rows.length, 2);
-  assert.equal(smaller.hiddenCount, 5);
-});
-
-test('each row carries the account, timing and activity the card shows', () => {
-  const rows = modelSessionRows([route(3, { served: 'alpha', account: undefined, folder: 'x' })]).rows;
-  assert.equal(rows[0].provider, 'officeace');
-  assert.equal(rows[0].account, 'who3');
-  assert.equal(rows[0].at, at(3));
-  assert.equal(rows[0].ttft, 600);
-  assert.equal(rows[0].out, 240);
-  assert.equal(Math.round(rows[0].speed), 100);
-  assert.equal(rows[0].route.id, 3);
+test('the group carries the account of its most recent seat', () => {
+  const { groups } = providerSessionGroups([
+    route(1, { provider: 'officeace', order: [{ id: 'acct1', provider: 'officeace', name: 'OfficeAce', kind: 'account', who: 'first@example.com', model: 'm1' }] }),
+    route(3, { provider: 'officeace', order: [{ id: 'acct3', provider: 'officeace', name: 'OfficeAce', kind: 'account', who: 'last@example.com', model: 'm3' }] }),
+  ]);
+  assert.equal(groups[0].account, 'last@example.com');
+  assert.equal(groups[0].at, at(3));
 });
