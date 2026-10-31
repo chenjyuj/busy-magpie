@@ -3192,3 +3192,142 @@ body.updating .gateway .brand, body.updating .gateway .brand-sep { display: none
   background: linear-gradient(90deg, #7f68e8, #c0aeff);
   transition: width 0.18s ease;
 }
+
+/* ── the model list ───────────────────────────────────────────────────── */
+/* The card's only view: one row for each model that served a request. The
+   routing stage, its wires and its flying magpies used to live here. */
+
+.content {
+  grid-template-rows: 30px 10px 1fr 6px 16px;
+}
+
+.model-list {
+  grid-row: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.model-head,
+.model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) 0.85fr 0.8fr 0.8fr 0.9fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.model-head {
+  padding: 0 12px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--faint);
+}
+
+.model-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.model-row {
+  height: 46px;
+  padding: 0 12px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--node-bg-top), var(--node-bg-bottom));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
+  font-size: 12px;
+}
+
+.model-row.live {
+  box-shadow: inset 0 0 0 1px rgb(161 139 255 / 0.38), inset 0 1px 0 rgb(255 255 255 / 0.05);
+}
+
+.model-row.error {
+  box-shadow: inset 0 0 0 1px rgb(255 131 151 / 0.38), inset 0 1px 0 rgb(255 255 255 / 0.05);
+}
+
+.col-model {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.model-name {
+  overflow: hidden;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-reroute {
+  flex: none;
+  font-size: 9.5px;
+  color: var(--warn);
+}
+
+.col-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.state-word {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-row.live .state-word { color: var(--accent); }
+.model-row.error .state-word { color: var(--bad); }
+
+.col-ms,
+.col-ttft,
+.col-speed {
+  overflow: hidden;
+  font-size: 12px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.col-ttft,
+.col-speed { color: var(--muted); }
+
+.model-empty {
+  margin: 0;
+  padding: 18px 0;
+  text-align: center;
+  color: var(--faint);
+}
+
+.model-hidden {
+  margin: 0;
+  font-size: 10.5px;
+  text-align: right;
+  color: var(--faint);
+}
+
+/* A dropped gateway keeps the last frame and labels it, instead of blanking a
+   list the user is still reading. */
+body.stale .model-rows { opacity: 0.5; }
+
+body.stale .live-word::after {
+  content: " · 暂未刷新";
+  color: var(--warn);
+}
+
+.list-footer {
+  grid-row: 5;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 10px;
+  color: var(--faint);
+}

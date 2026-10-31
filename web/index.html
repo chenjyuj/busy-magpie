@@ -22,7 +22,6 @@
       </div>
       <div class="stage-area" id="stageArea">
         <div class="stage-canvas" id="stageCanvas">
-          <svg class="bird-sky" id="birdSky" aria-hidden="true"></svg>
           <div class="drag-bar" id="dragBar" title="长按拖动面板">
             <span class="drag-grip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
           </div>
@@ -67,141 +66,27 @@
               <i class="halo"></i>
               <i class="core"></i>
             </span>
-            <span class="live-word">路由</span>
+            <span class="live-word">模型</span>
             <span class="dot-sep">·</span>
             <strong id="liveState">实时</strong>
           </div>
         </header>
 
-        <main class="stage">
-          <svg class="single-wires" id="singleWires" aria-hidden="true"></svg>
-          <section class="node agent" id="agentNode">
-            <div class="agent-icon" id="agentGlyph">&gt;_</div>
-            <div class="agent-copy">
-              <div class="agent-line">
-                <i class="status-dot good" id="agentDot"></i>
-                <b id="agentName">Codex</b>
-              </div>
-              <div class="mono model" id="agentModel">gpt-6-astra</div>
-              <div class="request-modes" id="agentModes" hidden></div>
-            </div>
-          </section>
-
-          <div class="wire" id="wireIn" aria-hidden="true">
-            <i class="spark"></i>
+        <section class="model-list" id="modelList" aria-label="按实际服务模型分组的最近会话">
+          <div class="model-head mono">
+            <span class="col-model">模型</span>
+            <span class="col-state">状态</span>
+            <span class="col-ms">时长</span>
+            <span class="col-ttft">首字</span>
+            <span class="col-speed">tok/s</span>
           </div>
-
-          <section class="hub" id="hub">
-            <div class="hub-glow"></div>
-            <div class="hub-card">
-              <svg class="bird" viewBox="0 0 44 44" aria-hidden="true">
-                <path id="birdPath" fill-rule="evenodd"></path>
-              </svg>
-              <i class="hub-live"></i>
-            </div>
-          </section>
-
-          <div class="wire" id="wireOut" aria-hidden="true">
-            <i class="spark"></i>
-          </div>
-
-          <section class="node account" id="accountNode">
-            <div class="account-top">
-              <i class="status-dot good" id="accountDot"></i>
-              <span class="provider-icon" id="providerIcon"></span>
-              <b class="account-name" id="accountName">Codex's own sign-in</b>
-            </div>
-            <div class="account-mid">
-              <span class="mono model-chip" id="accountModel">gpt-6-astra</span>
-              <span class="plan" id="accountPlan"></span>
-            </div>
-            <div class="account-state">
-              <i class="status-dot accent" id="accountStateDot"></i>
-              <span id="accountState">回答中…</span>
-            </div>
-            <div class="account-quota" id="accountQuota" hidden>
-              <i class="account-quota-bar"><i id="accountQuotaBar"></i></i>
-              <span class="mono" id="accountQuotaText"></span>
-            </div>
-            <div class="account-token mono" id="accountToken" hidden></div>
-          </section>
-        </main>
-
-        <section class="lanes" id="lanes">
-          <div class="lanes-head">
-            <span class="lanes-title">
-              <i class="lanes-dot"></i>
-              <b id="lanesTitle">多个 Agent 正在执行</b>
-            </span>
-            <span class="lanes-sub" id="lanesSub">各自选择账号</span>
-          </div>
-          <div class="fan" id="fan">
-            <svg class="fan-wires" id="fanWires" aria-hidden="true"></svg>
-            <div class="fan-side fan-left" id="fanAgents"></div>
-            <div class="hub fan-hub" id="fanHub">
-              <div class="hub-glow"></div>
-              <div class="hub-card">
-                <svg class="bird" viewBox="0 0 44 44" aria-hidden="true">
-                  <path id="fanBirdPath" fill-rule="evenodd"></path>
-                </svg>
-                <i class="hub-live"></i>
-              </div>
-            </div>
-            <div class="fan-side fan-right" id="fanAccounts"></div>
-          </div>
+          <div class="model-rows" id="modelRows"></div>
+          <p class="model-empty" id="modelEmpty" hidden>等待 magpie 数据</p>
+          <p class="model-hidden mono" id="modelHidden" hidden></p>
         </section>
 
-        <section class="summary">
-          <p class="caption" id="caption"></p>
-          <div class="stats" title="请求、改道和错误统计自本次 magpie 网关启动；不随上方 token 时间窗切换">
-            <span class="stats-scope">网关本次启动</span>
-            <div class="stat">
-              <b id="statRequests">0</b>
-              <span>请求</span>
-            </div>
-            <i class="stat-rule"></i>
-            <div class="stat">
-              <b id="statRerouted">0</b>
-              <span>改道</span>
-            </div>
-            <i class="stat-rule"></i>
-            <div class="stat wide">
-              <b id="statErrors">0</b>
-              <span>Agent 收到的错误</span>
-            </div>
-          </div>
-        </section>
-
-        <div class="rule"></div>
-
-        <section class="latest">
-          <div class="latest-head">
-            <span>最近一个请求是怎么路由的</span>
-            <time class="mono" id="storyTime"></time>
-          </div>
-          <ol class="story">
-            <li id="storyRow1">
-              <span class="bullet-wrap"><i class="bullet"></i></span>
-              <p id="story1"></p>
-            </li>
-            <li id="storyRow2">
-              <span class="bullet-wrap"><i class="bullet"></i></span>
-              <p id="story2"></p>
-            </li>
-            <li id="storyRow3">
-              <span class="bullet-wrap"><i class="halo"></i><i class="bullet"></i></span>
-              <p id="story3"></p>
-            </li>
-          </ol>
-          <footer class="footer">
-            <span>网关实时 trace · 本地读取</span>
-            <span class="footer-sep"></span>
-            <span>鼠标点击穿透</span>
-          </footer>
-        </section>
-
-        <footer class="multi-footer" id="multiFooter">
-          <span>网关实时 trace · 所有进行中的请求</span>
+        <footer class="list-footer">
+          <span>网关实时 trace · 本地读取</span>
           <span class="footer-sep"></span>
           <span>鼠标点击穿透</span>
         </footer>

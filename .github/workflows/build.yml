@@ -59,9 +59,8 @@ jobs:
       - name: Verify Windows drag bounds at 175 percent scaling
         if: runner.os == 'Windows'
         run: node node_modules/electron/cli.js tests/ui/drag-bounds.cjs --scale=1.75 --label=ci
-      - name: Verify Windows bird animation layout
-        if: runner.os == 'Windows'
-        run: node node_modules/electron/cli.js tests/ui/routing-animation-bounds.cjs
+      - name: Verify the model list card
+        run: node node_modules/electron/cli.js tests/ui/model-list.cjs
       - run: npm run ${{ matrix.script }}
       - name: Verify Windows business updates and rollback
         if: runner.os == 'Windows'

@@ -1,20 +1,13 @@
 import {
-  connecting,
-  empty,
   formatDuration,
-  formatEta,
   formatTokens,
-  offline,
-  present,
+  mask,
+  providerName,
 } from './presenter.js';
 import { brandKey, brandMark } from './brand-icons.mjs';
 import { downloadSize } from './download-progress.mjs';
-import { FlightBook } from './flight-playback.mjs';
-import { wireCurve, hubCurve, glideProgress } from './flight-path.mjs';
-import { stagedRoutes, wireState, nextRestExpiry } from './routing-state.mjs';
-import { requestActive, requestGroupKey, groupRequests } from './request-model.mjs';
 import { redactDiagnostic } from './redact.mjs';
-import { projectRequestModes } from './request-modes.mjs';
+import { modelSessionRows } from './model-sessions.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -25,48 +18,12 @@ const el = {
   appVersion: $('appVersion'),
   stageArea: $('stageArea'),
   stageCanvas: $('stageCanvas'),
-  birdSky: $('birdSky'),
-  agentNode: $('agentNode'),
-  agentGlyph: $('agentGlyph'),
-  agentName: $('agentName'),
-  agentModel: $('agentModel'),
-  agentModes: $('agentModes'),
-  agentDot: $('agentDot'),
-  hub: $('hub'),
-  accountNode: $('accountNode'),
-  accountName: $('accountName'),
-  accountModel: $('accountModel'),
-  accountPlan: $('accountPlan'),
-  accountState: $('accountState'),
-  accountDot: $('accountDot'),
-  accountStateDot: $('accountStateDot'),
-  accountToken: $('accountToken'),
-  accountQuota: $('accountQuota'),
-  accountQuotaBar: $('accountQuotaBar'),
-  accountQuotaText: $('accountQuotaText'),
   tokenPill: $('tokenPill'),
   tokenTotal: $('tokenTotal'),
   tokenWindow: $('tokenWindow'),
-  providerIcon: $('providerIcon'),
-  wireIn: $('wireIn'),
-  wireOut: $('wireOut'),
-  caption: $('caption'),
-  statRequests: $('statRequests'),
-  statRerouted: $('statRerouted'),
-  statErrors: $('statErrors'),
-  storyTime: $('storyTime'),
-  storyRows: [$('storyRow1'), $('storyRow2'), $('storyRow3')],
-  stories: [$('story1'), $('story2'), $('story3')],
-  lanes: $('lanes'),
-  lanesTitle: $('lanesTitle'),
-  lanesSub: $('lanesSub'),
-  fan: $('fan'),
-  fanWires: $('fanWires'),
-  fanAgents: $('fanAgents'),
-  fanAccounts: $('fanAccounts'),
-  fanHub: $('fanHub'),
-  fanBirdPath: $('fanBirdPath'),
-  multiFooter: $('multiFooter'),
+  modelRows: $('modelRows'),
+  modelEmpty: $('modelEmpty'),
+  modelHidden: $('modelHidden'),
 };
 
 let settings = {
@@ -77,55 +34,24 @@ let settings = {
   enabledPeriods: ['today', '7d', '30d', 'all'],
   pillMetric: 'total',
   rollTokens: true,
-  showQuota: true,
   showTiming: true,
-  hubEffect: 'ripple',
 };
 let lastTrace = null;
 let usageData = null;
 let usageStatus = { loading: false, stale: false, at: 0, error: '' };
 let connection = { online: false, detail: '正在连接' };
 let layout = false;
-let frame = { lanes: 1, cardHeight: 400, windowHeight: 432 };
-const seenRoutes = new Set();
+let frame = { cardHeight: 400, windowHeight: 432 };
 
 const numberAnimations = new WeakMap();
-const SVG_NS = 'http://www.w3.org/2000/svg';
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const motionReduced = () => Boolean(settings.quietMotion || reducedMotion.matches);
-const flights = new Map();
-const flightBook = new FlightBook();
-const flightAnchors = new Map();
-let flightRenderPending = false;
-let stageExpiryTimer = 0;
-let clockTrace = null;
-let gatewayClockOffset = 0;
-
-// The same flying magpie magpie's own Routing page draws: facing right,
-// wings beating from the shoulder, banked into the turn.
-const FLIER =
-  '<g class="rt-lift"><g transform="scale(1.2) translate(-6.5 3.2)">'
-  + '<path class="wing far" d="M-14.5 -3.4C-16.5 -9.5 -14.2 -15 -8.6 -18.6C-9.4 -12.6 -9.6 -7.4 -9.2 -3.2Z"/>'
-  + '<path class="tail" d="M-31.5 3.1L-18.6 -1.8L-17.4 1.2L-30.8 4.6Z"/>'
-  + '<ellipse class="body" cx="-12.2" cy="-1.4" rx="7.6" ry="3.9"/>'
-  + '<ellipse class="belly" cx="-12.8" cy="0.4" rx="4.3" ry="1.6"/>'
-  + '<circle class="body" cx="-4.9" cy="-3.7" r="3.1"/>'
-  + '<path class="body" d="M-2.3 -4.8L1.4 -3.3L-2.3 -2.2Z"/>'
-  + '<g class="wing near"><path d="M-15.6 -3.2C-17.8 -10.2 -15.2 -16.4 -8.4 -20.4C-9.3 -13.6 -9.4 -7.8 -8.8 -2.8Z"/>'
-  + '<path class="bar" d="M-14.6 -5.6C-15.4 -10.4 -13.8 -14.4 -10.4 -17.2"/></g>'
-  + '</g></g>';
 
 function iconSetup() {
   const icons = window.busy.icons || {};
-  const bird = $('birdPath');
-  const fanBird = $('fanBirdPath');
   const openai = $('openaiPath');
   const deepseek = $('deepseekPath');
-  if (icons.magpie) {
-    bird.setAttribute('d', icons.magpie);
-    fanBird.setAttribute('d', icons.magpie);
-    $('aboutBirdPath').setAttribute('d', icons.magpie);
-  }
+  if (icons.magpie) $('aboutBirdPath').setAttribute('d', icons.magpie);
   if (icons.openai) openai.setAttribute('d', icons.openai);
   if (icons.deepseek) deepseek.setAttribute('d', icons.deepseek);
 }
@@ -141,8 +67,6 @@ function applyFrame(next) {
   requestAnimationFrame(() => {
     applyUiScale();
     if (compactChanged) render();
-    drawFanWires();
-    refreshFlightLegs();
   });
 }
 
@@ -269,64 +193,6 @@ function formatLatency(ms) {
   if (!value) return '—';
   return value < 1000 ? `${Math.round(value)}ms` : `${(value / 1000).toFixed(1)}s`;
 }
-
-// What the account card says under its state line: this request's tokens
-// and first-byte wait, then how much of the account's allowance is left.
-function accountDetail(view, compact = false) {
-  const timing = settings.showTiming !== false ? view.timing : null;
-  const parts = [];
-  if (compact && view.outputTokens > 0) parts.push(`输出 ${formatTokens(view.outputTokens)}`);
-  else if (view.tokenDetail) parts.push(view.tokenDetail);
-  if (timing?.speed) parts.push(`${Math.round(timing.speed.rate)} tok/s`);
-  // One row only: with a speed to show, the first-token wait moves to the
-  // hover tip instead of pushing the line into an ellipsis.
-  if (timing && timing.ttft > 0 && !timing.speed) parts.push(`首字 ${formatLatency(timing.ttft)}`);
-  const detail = parts.join(' · ');
-
-  const quota = settings.showQuota !== false ? view.quota : null;
-
-  const tip = [view.tokenTitle].filter(Boolean);
-  if (quota) {
-    const bits = [`剩 ${Math.round(quota.remaining)}%`];
-    if (quota.amount && quota.limit) {
-      const amount = `${Math.round(quota.amount).toLocaleString()} / ${Math.round(quota.limit).toLocaleString()}`;
-      bits.push(`${amount}${quota.unit ? ` ${quota.unit}` : ''}`);
-    }
-    const eta = formatEta(quota.renewAt);
-    if (eta) bits.push(eta);
-    tip.push(`额度：${bits.join(' · ')}`);
-  }
-  if (timing) {
-    const bits = [];
-    if (timing.speed) {
-      bits.push(`${Math.round(timing.speed.rate)} tok/s（${Math.round(timing.speed.tokens).toLocaleString('zh-CN')} token / ${formatDuration(timing.speed.window)}）`);
-    }
-    if (timing.ttft > 0) bits.push(`首字 ${formatLatency(timing.ttft)}`);
-    if (timing.ms > 0) bits.push(`总 ${formatDuration(timing.ms)}`);
-    if (timing.queued > 0) bits.push(`排队 ${formatDuration(timing.queued)}`);
-    else if (timing.wait > 0) bits.push(`等上游 ${formatDuration(timing.wait)}`);
-    if (timing.own > 0) bits.push(`magpie ${formatDuration(timing.own)}`);
-    if (bits.length) tip.push(`耗时：${bits.join(' · ')}`);
-  }
-  return { detail, title: tip.join('\n'), quota };
-}
-
-function renderAccountDetail(view) {
-  const { detail, title, quota } = accountDetail(view);
-  el.accountToken.textContent = detail;
-  el.accountToken.hidden = !detail;
-  el.accountQuota.hidden = !quota;
-  if (quota) {
-    const remaining = Math.max(0, Math.min(100, quota.remaining));
-    el.accountQuotaBar.style.width = `${Math.max(1.5, remaining).toFixed(1)}%`;
-    el.accountQuota.classList.toggle('low', remaining < 15);
-    const eta = formatEta(quota.renewAt);
-    el.accountQuotaText.textContent = `额度 ${Math.round(remaining)}%${eta ? ` · ${eta}` : ''}`;
-  }
-
-  el.accountNode.title = title;
-}
-
 function staticTokenTrack(char) {
   const track = document.createElement('span');
   track.className = 'token-track';
@@ -686,9 +552,7 @@ function setupSettingsPanel() {
   const gateway = $('settingsGateway');
   const periodChips = [...document.querySelectorAll('#settingsPeriods .settings-chip')];
   const metricChips = [...document.querySelectorAll('#settingsMetrics .settings-chip')];
-  const effectChips = [...document.querySelectorAll('#settingsEffects .settings-chip')];
   const roll = $('settingsRoll');
-  const quota = $('settingsQuota');
   const timing = $('settingsTiming');
   const keepAlive = $('settingsKeepAlive');
   const pathText = $('settingsPath');
@@ -766,17 +630,6 @@ function setupSettingsPanel() {
     });
   }
 
-  for (const chip of effectChips) {
-    chip.addEventListener('click', () => {
-      for (const other of effectChips) {
-        other.setAttribute('aria-pressed', other === chip ? 'true' : 'false');
-      }
-      // Preview right away: the drawer sits over the card, so the next
-      // crossing already uses the new gesture.
-      settings = { ...settings, hubEffect: chip.dataset.effect };
-    });
-  }
-
   const fill = (data, preserveOpacity = false) => {
     const s = data.settings || {};
     topmost.checked = Boolean(s.topmost);
@@ -786,9 +639,7 @@ function setupSettingsPanel() {
       Array.isArray(s.enabledPeriods) && s.enabledPeriods.length ? s.enabledPeriods : USAGE_PERIODS,
     ));
     pressChips(metricChips, new Set([String(s.pillMetric || 'total')]));
-    pressChips(effectChips, new Set([String(s.hubEffect || 'ripple')]));
     roll.checked = s.rollTokens !== false;
-    quota.checked = s.showQuota !== false;
     timing.checked = s.showTiming !== false;
     keepAlive.checked = s.keepAlive !== false;
     $('settingsCompact').checked = Boolean(s.compact);
@@ -884,10 +735,7 @@ function setupSettingsPanel() {
         pillMetric: (metricChips.find((chip) => chip.getAttribute('aria-pressed') === 'true')
           || metricChips[0]).dataset.metric,
         rollTokens: roll.checked,
-        showQuota: quota.checked,
         showTiming: timing.checked,
-        hubEffect: (effectChips.find((chip) => chip.getAttribute('aria-pressed') === 'true')
-          || effectChips[0]).dataset.effect,
         keepAlive: keepAlive.checked,
         compact: $('settingsCompact').checked,
         quietMotion: $('settingsQuiet').checked,
@@ -1089,468 +937,6 @@ function setupAbout() {
   });
 }
 
-function disposeFlight(flight) {
-  flight.bird.remove();
-  flight.guides.remove();
-  flight.fx.remove();
-  if (flights.get(flight.key) === flight) flights.delete(flight.key);
-}
-
-function stopFlights() {
-  flightBook.stop();
-  for (const flight of flights.values()) disposeFlight(flight);
-}
-
-function renderAfterFlight() {
-  if (flightRenderPending) return;
-  flightRenderPending = true;
-  requestAnimationFrame(() => { flightRenderPending = false; render(); });
-}
-
-function refreshFlightLegs() {
-  for (const flight of flights.values()) {
-    if (!flight.active || !buildFlightLegs(flight)) continue;
-    if (flight.holding) positionHeldFlight(flight);
-  }
-}
-
-function syncFlights() {
-  for (const flight of flights.values()) {
-    if (!flight.active || flightBook.sessions.get(flight.key) !== flight.playback) disposeFlight(flight);
-  }
-  for (const session of flightBook.sessions.values()) {
-    if (!flights.has(session.id)) startFlight(session);
-  }
-  refreshFlightLegs();
-}
-
-function startFlight(playback) {
-  const color = agentColor(playback.route.agent);
-  const bird = document.createElementNS(SVG_NS, 'g');
-  bird.setAttribute('class', 'flying-bird');
-  bird.dataset.requestId = playback.id;
-  bird.dataset.phase = 'queued';
-  bird.style.setProperty('--agent', color);
-  bird.style.opacity = '0';
-  const flier = document.createElementNS(SVG_NS, 'g');
-  flier.setAttribute('class', 'flier');
-  flier.innerHTML = FLIER;
-  const packet = document.createElementNS(SVG_NS, 'circle');
-  packet.setAttribute('class', 'packet');
-  packet.setAttribute('r', '3.2');
-  packet.setAttribute('cx', '0');
-  packet.setAttribute('cy', '0');
-  bird.append(flier, packet);
-  const guides = document.createElementNS(SVG_NS, 'g');
-  guides.setAttribute('aria-hidden', 'true');
-  const fx = document.createElementNS(SVG_NS, 'g');
-  fx.setAttribute('aria-hidden', 'true');
-  el.birdSky.append(guides, fx, bird);
-  const flight = {
-    key: playback.id, routeId: playback.id, playback,
-    get active() { return playback.active; },
-    single: !document.body.classList.contains('multi'),
-    color, bird, flier, packet, guides, fx,
-    hubCenter: null, hubHalf: null, hubSide: 'left',
-    fxScale: 1, fxAlpha: 1, pose: null,
-    aim: null, aimFlip: false, holding: null, trip: null,
-  };
-  flights.set(flight.key, flight);
-  queueMicrotask(() => runFlight(flight));
-}
-
-function buildFlightLegs(flight) {
-  const anchor = flightAnchors.get(flight.routeId);
-  if (!anchor) return false;
-  const { agent, account, hub } = anchor;
-  flight.single = !document.body.classList.contains('multi');
-  if (!agent || !account || !hub || !agent.isConnected || !account.isConnected) return false;
-
-  const sky = el.birdSky.getBoundingClientRect();
-  const ar = agent.getBoundingClientRect();
-  const cr = account.getBoundingClientRect();
-  const hr = hub.getBoundingClientRect();
-  // getBoundingClientRect is in the scaled, screen-space pixels, while the
-  // sky's own coordinate system is the unscaled 600×400 canvas, so the
-  // offsets have to be divided back into it or the flight drifts sideways
-  // as soon as the card is scaled.
-  const s = uiScale();
-  const ax = (ar.right - sky.left) / s;
-  const ay = (ar.top - sky.top + ar.height / 2) / s;
-  const cx = (cr.left - sky.left) / s;
-  const cy = (cr.top - sky.top + cr.height / 2) / s;
-  const hl = (hr.left - sky.left) / s;
-  const hrx = (hr.right - sky.left) / s;
-  const hy = (hr.top - sky.top + hr.height / 2) / s;
-
-  const trip = flight.trip || { from: 'agent', to: 'account' };
-  const geometryKey = [ax, ay, cx, cy, hl, hrx, hy, hr.height / s, trip.from, trip.to, flight.hubSide].join('|');
-  if (flight.geometryKey === geometryKey) return true;
-  flight.geometryKey = geometryKey;
-  const left = { x: hl, y: hy, tx: 1, ty: 0 };
-  const right = { x: hrx, y: hy, tx: 1, ty: 0 };
-  const size = Math.min(hr.width, hr.height) / s;
-  const definitions = [
-    wireCurve({ x: ax, y: ay }, left),
-    wireCurve(right, { x: cx, y: cy }),
-    trip.from === 'account' ? hubCurve({ ...right, tx: -1 }, { ...left, tx: -1 }, size)
-      : hubCurve(left, right, size),
-    hubCurve({ ...right, tx: -1 }, right, size),
-  ];
-  if (!flight.paths) {
-    flight.paths = definitions.map(() => {
-      const path = document.createElementNS(SVG_NS, 'path');
-      path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'none');
-      flight.guides.append(path);
-      return path;
-    });
-  }
-  flight.paths.forEach((path, index) => path.setAttribute('d', definitions[index]));
-  const [incoming, outgoing, through, turn] = flight.paths;
-  flight.leg1 = incoming; flight.leg2 = outgoing;
-  const leg = (path, reverse = false) => ({ path, reverse, length: path.getTotalLength() });
-  flight.legs = trip.from === 'agent' && trip.to === 'hub' ? [leg(incoming)]
-    : trip.from === 'account' && trip.to === 'hub' ? [leg(outgoing, true)]
-      : trip.from === 'hub' && trip.to === 'account' ? [leg(flight.hubSide === 'left' ? through : turn), leg(outgoing)]
-        : trip.from === 'account' ? [leg(outgoing, true), leg(through), leg(incoming, true)]
-          : [leg(incoming), leg(through), leg(outgoing)];
-  flight.length = flight.legs.reduce((sum, part) => sum + part.length, 0);
-  flight.hubCrossing = flight.legs.length === 1 ? flight.length
-    : trip.from === 'hub' ? flight.legs[0].length / 2
-      : flight.legs[0].length + flight.legs[1].length / 2;
-  flight.hubCenter = { x: (hl + hrx) / 2, y: hy };
-  flight.hubHalf = { x: (hrx - hl) / 2, y: hr.height / s / 2 };
-  return true;
-}
-
-function flightPoint(flight, distance) {
-  let remaining = Math.max(0, Math.min(flight.length, distance));
-  let index = 0;
-  while (index < flight.legs.length - 1 && (remaining > flight.legs[index].length || !flight.legs[index].length)) {
-    remaining -= flight.legs[index++].length;
-  }
-  const { path, reverse, length } = flight.legs[index];
-  return path.getPointAtLength(reverse ? length - remaining : remaining);
-}
-
-function flyTrip(flight, trip) {
-  return new Promise(resolve => {
-    const started = performance.now();
-    let fired = false;
-    const step = now => {
-      if (!flight.active || !buildFlightLegs(flight) || !flight.length) { resolve(); return; }
-      const progress = Math.max(0, Math.min(1, (now - started) / trip.ms));
-      const distance = glideProgress(progress) * flight.length;
-      if (!fired && distance >= flight.hubCrossing) {
-        fired = true;
-        passHub(flight, trip.from === 'account');
-      }
-      const p = flightPoint(flight, distance);
-      const p0 = flightPoint(flight, distance - 3), p1 = flightPoint(flight, distance + 3);
-      let vx = p1.x - p0.x, vy = p1.y - p0.y;
-      if (Math.abs(vx) + Math.abs(vy) < 0.01) vx = trip.from === 'account' ? -1 : 1;
-      const aim = Math.max(-24, Math.min(24, Math.atan2(vy, Math.abs(vx)) * 180 / Math.PI));
-      const flip = vx < 0 ? -1 : 1;
-      flight.aim = flight.aim === null || flight.aimFlip !== (vx < 0) ? aim : flight.aim + (aim - flight.aim) * 0.12;
-      flight.aimFlip = vx < 0;
-      const scale = 0.68 * (flight.fxScale || 1);
-      flight.bird.setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)}) scale(${flip * scale} ${scale}) rotate(${flight.aim.toFixed(2)})`);
-      flight.bird.style.opacity = String(flight.fxAlpha ?? 1);
-      if (progress < 1) requestAnimationFrame(step);
-      else resolve();
-    };
-    requestAnimationFrame(step);
-  });
-}
-
-function positionHeldFlight(flight) {
-  const path = flight.holding === 'account' ? flight.leg2
-    : flight.hubSide === 'left' ? flight.leg1 : flight.leg2;
-  const distance = flight.holding === 'account' || flight.hubSide === 'left' ? path.getTotalLength() : 0;
-  const p = path.getPointAtLength(distance);
-  flight.bird.setAttribute('transform', `translate(${p.x} ${p.y}) scale(0.68)`);
-}
-
-async function runFlight(flight) {
-  try {
-    await flight.playback.play(async trip => {
-      flight.trip = trip;
-      flight.holding = null;
-      flight.bird.dataset.phase = `${trip.from}-${trip.to}`;
-      flight.bird.dataset.attempt = String(trip.attempt);
-      flight.bird.classList.remove('held');
-      flight.bird.classList.toggle('back', trip.from === 'account');
-      flight.bird.classList.toggle('failed', trip.error);
-      flight.flier.style.opacity = '1';
-      flight.flier.classList.add('carrying');
-      flight.bird.style.opacity = '1';
-      render();
-      if (!flight.active || !buildFlightLegs(flight)) return;
-      await flyTrip(flight, trip);
-      if (trip.to === 'hub') flight.hubSide = trip.from === 'account' ? 'right' : 'left';
-    }, anchor => {
-      flight.holding = anchor;
-      flight.bird.dataset.phase = `waiting-${anchor}`;
-      flight.flier.style.opacity = '0';
-      flight.flier.classList.remove('carrying');
-      flight.bird.classList.add('held');
-      if (buildFlightLegs(flight)) positionHeldFlight(flight);
-      renderAfterFlight();
-    });
-  } finally {
-    disposeFlight(flight);
-    if (flightBook.finish(flight.playback)) renderAfterFlight();
-  }
-}
-
-// ── the hub a request flies through ────────────────────────────────────
-// Crossing magpie is the one moment every route shares, so it gets a
-// flourish. Four gestures are staged behind 设置 → 穿过动效; each is one-shot
-// and removes itself, so a transparent always-on window pays nothing once the
-// pass is over.
-const HUB_EFFECTS = ['none', 'ripple', 'vortex', 'dissolve', 'arc'];
-const HUB_FLASH_MS = 460;
-const HUB_BURSTS = 3;
-const hubPassTimers = new WeakMap();
-const hubBursts = new WeakMap();
-
-function passHub(flight, back = false) {
-  if (!flight.active) return;
-  // 设置 → 穿过动效 → 无: the crossing stays silent, and the bird just flies.
-  if (settings.hubEffect === 'none') return;
-  const hub = flight.single ? el.hub : el.fanHub;
-  if (!hub || !hub.querySelector('.hub-card')) return;
-
-  // Shared opening: the card takes the agent's colour and the logo gives a
-  // small start, whichever gesture follows.
-  hub.style.setProperty('--route', flight.color);
-  hub.classList.remove('passing');
-  // Reading a layout property drops the previous animation, so two passes in
-  // quick succession each get a full gesture instead of sharing one.
-  void hub.offsetWidth;
-  hub.classList.add('passing');
-  clearTimeout(hubPassTimers.get(hub));
-  hubPassTimers.set(hub, window.setTimeout(
-    () => hub.classList.remove('passing'),
-    HUB_FLASH_MS,
-  ));
-
-  flight.bird.classList.add('passing');
-  window.setTimeout(() => flight.bird.classList.remove('passing'), 640);
-
-  const center = flight.hubCenter;
-  if (!center || !flight.fx) return;
-  const burst = hubBurst(hub, flight.fx);
-  const effect = HUB_EFFECTS.includes(settings.hubEffect) ? settings.hubEffect : 'ripple';
-  if (effect === 'vortex') vortexPass(burst, flight, center);
-  else if (effect === 'dissolve') dissolvePass(burst, flight, center);
-  else if (effect === 'arc') arcPass(burst, flight, center);
-  else ripplePass(burst, flight, center, back);
-}
-
-function hubBurst(hub, fx) {
-  const burst = document.createElementNS(SVG_NS, 'g');
-  burst.setAttribute('aria-hidden', 'true');
-  fx.append(burst);
-  // With several requests in the air the bursts would pile into a smear, so
-  // only the last few are kept: the hub still looks busy, but a crossing can
-  // still be read as one crossing.
-  let live = hubBursts.get(hub);
-  if (!live) {
-    live = [];
-    hubBursts.set(hub, live);
-  }
-  live.push(burst);
-  while (live.length > HUB_BURSTS) live.shift().remove();
-  window.setTimeout(() => {
-    burst.remove();
-    const at = live.indexOf(burst);
-    if (at >= 0) live.splice(at, 1);
-  }, 1000);
-  return burst;
-}
-
-function skyCircle(burst, center, r, paint = {}) {
-  const dot = document.createElementNS(SVG_NS, 'circle');
-  dot.setAttribute('cx', String(center.x));
-  dot.setAttribute('cy', String(center.y));
-  dot.setAttribute('r', String(r));
-  for (const [key, value] of Object.entries(paint)) dot.setAttribute(key, value);
-  // Scale must be measured from each shape's own box, or the dot would slide
-  // towards the sky's top-left corner as it shrinks.
-  dot.style.transformBox = 'fill-box';
-  dot.style.transformOrigin = 'center';
-  burst.append(dot);
-  return dot;
-}
-
-function tweenFlight(flight, ms, fn) {
-  const t0 = performance.now();
-  const step = (now) => {
-    if (!flight.active) return;
-    const t = Math.min(1, (now - t0) / ms);
-    fn(t);
-    if (t < 1) requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-}
-
-/* 01 ─ a ring and a few sparks ─────────────────────────────────────────── */
-function ripplePass(burst, flight, center, back) {
-  skyCircle(burst, center, 9, { class: 'hub-shock', fill: 'none', stroke: flight.color });
-  // The answer is a quieter visitor than the request that went out.
-  const count = back ? 5 : 8;
-  for (let i = 0; i < count; i++) {
-    const spark = skyCircle(burst, center, (1 + Math.random() * 0.9).toFixed(2), {
-      class: 'hub-spark',
-      fill: flight.color,
-    });
-    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.7;
-    const distance = 16 + Math.random() * 20;
-    spark.style.setProperty('--dx', `${(Math.cos(angle) * distance).toFixed(1)}px`);
-    spark.style.setProperty('--dy', `${(Math.sin(angle) * distance).toFixed(1)}px`);
-  }
-}
-
-/* 02 ─ the bird is pulled in, then spat out ────────────────────────────── */
-function vortexPass(burst, flight, center) {
-  const swirl = skyCircle(burst, center, 13, {
-    class: 'hub-swirl',
-    fill: 'none',
-    stroke: flight.color,
-    'stroke-width': '1.1',
-    'stroke-dasharray': '5 5',
-    'stroke-linecap': 'round',
-  });
-  swirl.animate([
-    { transform: 'scale(1.6) rotate(0deg)', opacity: 0 },
-    { transform: 'scale(1) rotate(200deg)', opacity: 0.9, offset: 0.55 },
-    { transform: 'scale(0.3) rotate(430deg)', opacity: 0 },
-  ], { duration: 620, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
-
-  for (let i = 0; i < 10; i++) {
-    const dot = skyCircle(burst, center, 1.2, { class: 'hub-orbit', fill: i % 2 ? flight.color : '#ffffff' });
-    const a0 = (Math.PI * 2 * i) / 10;
-    const a1 = a0 + Math.PI * 0.9;
-    dot.animate([
-      {
-        transform: `translate(${(Math.cos(a0) * 46).toFixed(1)}px, ${(Math.sin(a0) * 46).toFixed(1)}px) scale(1)`,
-        opacity: 0,
-      },
-      {
-        transform: `translate(${(Math.cos(a1) * 22).toFixed(1)}px, ${(Math.sin(a1) * 22).toFixed(1)}px) scale(0.9)`,
-        opacity: 0.95,
-        offset: 0.45,
-      },
-      { transform: 'translate(0px, 0px) scale(0.1)', opacity: 0 },
-    ], { duration: 620, delay: i * 12, easing: 'cubic-bezier(.5,0,.3,1)', fill: 'forwards' });
-  }
-
-  // the bird is squeezed into a point while it is inside the door
-  tweenFlight(flight, 520, (t) => {
-    flight.fxScale = 1 - Math.sin(Math.PI * t) * 0.7;
-    if (t === 1) flight.fxScale = 1;
-  });
-}
-
-/* 03 ─ the bird comes apart and re-forms ───────────────────────────────── */
-function dissolvePass(burst, flight, center) {
-  for (let i = 0; i < 16; i++) {
-    const dot = skyCircle(burst, center, (0.9 + Math.random() * 0.9).toFixed(2), {
-      class: 'hub-dust',
-      fill: i % 3 === 0 ? '#ffffff' : flight.color,
-    });
-    const a = Math.random() * Math.PI * 2;
-    const d = 8 + Math.random() * 26;
-    dot.animate([
-      { transform: 'translate(0px, 0px) scale(1)', opacity: 1 },
-      {
-        transform: `translate(${(Math.cos(a) * d).toFixed(1)}px, ${(Math.sin(a) * d).toFixed(1)}px) scale(0.3)`,
-        opacity: 0,
-      },
-    ], {
-      duration: 420 + Math.random() * 220,
-      delay: Math.random() * 70,
-      easing: 'cubic-bezier(.2,.7,.4,1)',
-      fill: 'forwards',
-    });
-  }
-
-  // the bird becomes the dust while it is inside the card, then re-forms
-  tweenFlight(flight, 90, (t) => { flight.fxAlpha = 1 - t; });
-  window.setTimeout(() => {
-    if (!flight.active) return;
-    tweenFlight(flight, 170, (t) => { flight.fxAlpha = t; });
-  }, 190);
-}
-
-/* 04 ─ a few arcs across the card ──────────────────────────────────────── */
-function arcPass(burst, flight, center) {
-  const half = flight.hubHalf || { x: 22, y: 22 };
-  for (let i = 0; i < 3; i++) {
-    const points = [];
-    let x = center.x - half.x;
-    let y = center.y - half.y * 0.9;
-    points.push(`M ${x.toFixed(1)} ${y.toFixed(1)}`);
-    while (x < center.x + half.x) {
-      x += 3 + Math.random() * 4;
-      y += (Math.random() - 0.5) * 10;
-      y = Math.max(center.y - half.y, Math.min(center.y + half.y, y));
-      points.push(`L ${Math.min(center.x + half.x, x).toFixed(1)} ${y.toFixed(1)}`);
-    }
-    const bolt = document.createElementNS(SVG_NS, 'path');
-    bolt.setAttribute('class', 'hub-bolt');
-    bolt.setAttribute('d', points.join(' '));
-    bolt.setAttribute('fill', 'none');
-    bolt.setAttribute('stroke', i === 1 ? '#ffffff' : flight.color);
-    bolt.setAttribute('stroke-width', (0.8 + Math.random()).toFixed(2));
-    bolt.setAttribute('stroke-linejoin', 'round');
-    bolt.setAttribute('stroke-linecap', 'round');
-    burst.append(bolt);
-    bolt.animate([
-      { opacity: 0 },
-      { opacity: 1, offset: 0.16 },
-      { opacity: 0.15, offset: 0.48 },
-      { opacity: 1, offset: 0.64 },
-      { opacity: 0 },
-    ], { duration: 300 + i * 80, easing: 'steps(1, end)', fill: 'forwards' });
-  }
-}
-
-function agentMark(agent, glyph) {
-  return brandMark(brandKey(agent), window.busy.brandIcons) || document.createTextNode(glyph || '');
-}
-
-function cubeMark() {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('aria-hidden', 'true');
-  const path = document.createElementNS(SVG_NS, 'path');
-  path.setAttribute('d', 'M12 3 20 7.5v9L12 21 4 16.5v-9L12 3Z M4 7.5l8 4.5 8-4.5 M12 12v9');
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '1.4');
-  path.setAttribute('stroke-linejoin', 'round');
-  svg.append(path);
-  return svg;
-}
-
-function providerMark(icon) {
-  return brandMark(brandKey(icon, 'provider'), window.busy.brandIcons) || cubeMark();
-}
-
-function setStatusDot(node, kind) {
-  node.className = `status-dot ${kind}`;
-}
-
-function stateClass(view) {
-  return view.failed ? 'failed' : view.inFlight ? 'inflight' : view.hasRoute ? 'done' : 'idle';
-}
-
-function stateDot(kind) {
-  return kind === 'failed' ? 'bad' : kind === 'done' ? 'good' : kind === 'inflight' ? 'accent' : 'warn';
-}
-
 function animateNumber(target, value) {
   if (motionReduced()) {
     const animation = numberAnimations.get(target);
@@ -1613,684 +999,102 @@ function applyGateway() {
   if (el.gateway) el.gateway.textContent = settings.gateway || '127.0.0.1:3425';
 }
 
-const routingAnimations = new Set();
-const routingGhosts = new Map();
-let routingFrame = 0;
 
-function routingTargets() {
-  const multi = document.body.classList.contains('multi');
-  const nodes = multi ? [...el.fanAgents.children, ...el.fanAccounts.children] : [el.agentNode, el.accountNode];
-  return [...nodes.map(node => ({ key: node.dataset.layoutKey, node })), { key: 'hub', node: multi ? el.fanHub : el.hub }];
+// ── the model list ─────────────────────────────────────────────────────
+// The card's whole view: one row for each model that served a request, each
+// showing that model's most recent session. The routing stage, its wires and
+// its flying magpies are gone; only what a model actually did is left.
+
+const ROW_LIMIT = 6;
+const STATE_WORDS = { error: '错误', live: '进行中', ok: '完成' };
+let rowsShown = 0;
+
+const routeActive = route => Boolean(route) && (!route.done || (route.tries || []).some(item => !item.done));
+
+function relativeTime(iso) {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return '';
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (seconds < 60) return `${seconds}s 前`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m 前`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h 前`;
+  return `${Math.round(hours / 24)}d 前`;
 }
 
-function captureRoutingLayout() {
-  const canvas = el.stageCanvas.getBoundingClientRect(), scale = uiScale();
-  const before = new Map();
-  for (const { key, node } of routingTargets()) {
-    const rect = node.getBoundingClientRect();
-    if (!key || !rect.width || !rect.height) continue;
-    before.set(key, { node, clone: node.cloneNode(true), rect, scale,
-      left: (rect.left - canvas.left) / scale, top: (rect.top - canvas.top) / scale,
-      opacity: Number(getComputedStyle(node).opacity), multi: document.body.classList.contains('multi') });
-  }
-  for (const [key, ghost] of routingGhosts) {
-    if (before.has(key)) continue;
-    const rect = ghost.getBoundingClientRect();
-    before.set(key, { node: ghost, clone: ghost.firstElementChild.cloneNode(true), rect, scale,
-      left: (rect.left - canvas.left) / scale, top: (rect.top - canvas.top) / scale,
-      opacity: Number(getComputedStyle(ghost).opacity), multi: ghost.classList.contains('fan') });
-  }
-  for (const animation of [...routingAnimations]) {
-    if (!animation.effect.target.classList.contains('routing-ghost') || motionReduced() || frame.compact) animation.cancel();
-  }
-  if (motionReduced() || frame.compact) {
-    for (const ghost of routingGhosts.values()) ghost.remove();
-    routingGhosts.clear();
-  }
-  return before;
+// What the row says on hover: who served it, when, and how it got here.
+function rowTip(row) {
+  const bits = [];
+  const provider = providerName('', row.provider);
+  if (provider) bits.push(provider);
+  if (row.account) bits.push(settings.maskAccounts ? mask(row.account) : row.account);
+  const when = relativeTime(row.at);
+  if (when) bits.push(`最近活动 ${when}`);
+  if (row.reroutes > 0) bits.push(`改道 ${row.reroutes} 次`);
+  return bits.join(' · ');
 }
 
-function animateRoutingNode(node, frames, duration = 500, cleanup) {
-  const animation = node.animate(frames, { duration, easing: 'cubic-bezier(.2,.8,.2,1)' });
-  routingAnimations.add(animation);
-  const finish = () => { routingAnimations.delete(animation); cleanup?.(); };
-  animation.onfinish = finish;
-  animation.oncancel = finish;
-}
+function modelRowNode(row) {
+  const node = create('div', `model-row ${row.status}`);
+  node.dataset.model = row.model;
+  node.dataset.status = row.status;
 
-function updateRoutingPaths() {
-  drawFanWires();
-  drawSingleWires();
-  refreshFlightLegs();
-}
+  const name = create('span', 'col-model');
+  name.append(create('b', 'model-name', row.model));
+  if (row.reroutes > 0) name.append(create('i', 'row-reroute mono', `改道 ${row.reroutes} 次`));
 
-function followRoutingLayout() {
-  routingFrame = 0;
-  updateRoutingPaths();
-  if (routingAnimations.size) routingFrame = requestAnimationFrame(followRoutingLayout);
-}
+  const state = create('span', 'col-state');
+  state.append(create('i', `status-dot ${row.status === 'error' ? 'bad' : row.status === 'live' ? 'accent' : 'good'}`));
+  state.append(create('span', 'state-word', STATE_WORDS[row.status] || '完成'));
 
-function animateRoutingLayout(before) {
-  if (motionReduced() || frame.compact) { updateRoutingPaths(); return; }
-  const scale = uiScale(), targets = routingTargets(), keys = new Set(targets.map(target => target.key));
-  for (const { key, node } of targets) {
-    const to = node.getBoundingClientRect();
-    if (!key || !to.width || !to.height) continue;
-    const previous = before.get(key);
-    const ghost = routingGhosts.get(key);
-    if (ghost) {
-      for (const animation of ghost.getAnimations()) animation.cancel();
-      ghost.remove(); routingGhosts.delete(key);
-    }
-    if (previous) {
-      const from = previous.rect;
-      const dx = (from.left - to.left) / scale, dy = (from.top - to.top) / scale;
-      const sx = from.width / to.width, sy = from.height / to.height;
-      if (Math.abs(dx) + Math.abs(dy) < 0.2 && Math.abs(sx - 1) + Math.abs(sy - 1) < 0.002 && previous.opacity > 0.99) continue;
-      animateRoutingNode(node, [
-        { translate: `${dx}px ${dy}px`, scale: `${sx} ${sy}`, opacity: previous.opacity },
-        { translate: '0px 0px', scale: '1 1', opacity: 1 },
-      ]);
-    } else if (before.size) {
-      animateRoutingNode(node, [{ opacity: 0, translate: '0px 8px', scale: '0.97' }, { opacity: 1, translate: '0px 0px', scale: '1' }], 300);
-    }
-  }
-  for (const [key, previous] of before) {
-    if (keys.has(key) || key === 'hub' || routingGhosts.has(key)) continue;
-    const ghost = document.createElement('div');
-    ghost.className = `routing-ghost ${previous.multi ? 'fan' : 'stage'}`;
-    ghost.setAttribute('aria-hidden', 'true');
-    const width = previous.rect.width / previous.scale, height = previous.rect.height / previous.scale;
-    Object.assign(ghost.style, { left: `${previous.left}px`, top: `${previous.top}px`, width: `${width}px`, height: `${height}px` });
-    const clone = previous.clone;
-    for (const item of [clone, ...clone.querySelectorAll('[id]')]) item.removeAttribute('id');
-    Object.assign(clone.style, { width: `${width}px`, height: `${height}px`, animation: 'none' });
-    ghost.append(clone); el.stageCanvas.append(ghost);
-    routingGhosts.set(key, ghost);
-    animateRoutingNode(ghost, [{ opacity: previous.opacity }, { opacity: 0 }], 180, () => {
-      ghost.remove();
-      if (routingGhosts.get(key) === ghost) routingGhosts.delete(key);
-    });
-  }
-  if (routingAnimations.size && !routingFrame) routingFrame = requestAnimationFrame(followRoutingLayout);
-  else updateRoutingPaths();
-}
-
-function reuseRoutingNode(container, next) {
-  const existing = [...container.children].find(node => node.dataset.layoutKey === next.dataset.layoutKey);
-  if (!existing) return next;
-  for (const attribute of next.attributes) existing.setAttribute(attribute.name, attribute.value);
-  existing.replaceChildren(...next.childNodes);
-  return existing;
-}
-
-function placeRoutingNodes(container, nodes) {
-  const wanted = new Set(nodes);
-  for (const child of [...container.children]) if (!wanted.has(child)) child.remove();
-  nodes.forEach((node, index) => { if (container.children[index] !== node) container.insertBefore(node, container.children[index] || null); });
-}
-
-function setMulti(on) {
-  const current = document.body.classList.contains('multi');
-  if (current === on) return;
-  document.body.classList.toggle('multi', on);
-  if (!on) {
-    el.fanAgents.replaceChildren();
-    el.fanAccounts.replaceChildren();
-    el.fanWires.replaceChildren();
-    seenRoutes.clear();
-  }
-}
-
-function renderView(view, color = '#a18bff') {
-  setMulti(false);
-  setLiveChrome(view);
-  el.agentNode.style.setProperty('--route', color);
-  el.accountNode.style.setProperty('--route', color);
-  el.wireIn.style.setProperty('--route', color);
-  el.wireOut.style.setProperty('--route', color);
-
-  el.agentName.textContent = view.agentName;
-  el.agentGlyph.replaceChildren(agentMark(view.agentId, view.agentGlyph));
-  el.agentModel.textContent = view.agentModel;
-  renderRequestModes(el.agentModes, view.modes, view.hasRoute);
-  el.agentNode.style.opacity = view.hasRoute ? '1' : '0.72';
-  setStatusDot(el.agentDot, view.failed ? 'bad' : view.hasRoute ? 'good' : 'warn');
-
-  el.accountName.textContent = view.accountName;
-  el.accountName.title = view.accountName;
-  el.accountModel.textContent = view.accountModel;
-  el.accountPlan.textContent = view.accountPlan || '';
-  el.accountPlan.hidden = !view.accountPlan;
-  el.accountState.textContent = view.accountState;
-  renderAccountDetail(view);
-  applyUsageTokens();
-  el.providerIcon.replaceChildren(providerMark(view.providerIcon));
-
-  const kind = stateClass(view);
-  el.accountNode.dataset.state = kind;
-  el.accountNode.classList.toggle('inflight', kind === 'inflight');
-  el.accountNode.classList.toggle('done', kind === 'done');
-  el.accountNode.classList.toggle('failed', kind === 'failed');
-  const dot = stateDot(kind);
-  setStatusDot(el.accountDot, 'account');
-  setStatusDot(el.accountStateDot, dot);
-
-  setParts(el.caption, view.caption);
-
-  const wireState = view.failed ? 'failed' : view.inFlight ? 'active' : view.hasRoute ? 'done' : '';
-  for (const wire of [el.wireIn, el.wireOut]) {
-    wire.classList.toggle('active', wireState === 'active');
-    wire.classList.toggle('done', wireState === 'done');
-    wire.classList.toggle('failed', wireState === 'failed');
-  }
-  el.hub.classList.toggle('active', Boolean(view.inFlight));
-  el.accountNode.style.opacity = view.hasRoute ? '1' : '0.72';
-
-  renderStory(view);
-  animateNumber(el.statRequests, view.requests);
-  animateNumber(el.statRerouted, view.rerouted);
-  animateNumber(el.statErrors, view.errors);
-}
-
-// The same non-error palette as magpie's Routing page. Red remains an error.
-const ROUTE_COLORS = {
-  claude: '#d97757', 'claude-code': '#d97757', codex: '#EFEDF7', gemini: '#0ea5e9',
-  copilot: '#a855f7', cursor: '#14b8a6', opencode: '#eab308', crush: '#ec4899',
-  goose: '#84cc16', pi: '#10b981', omp: '#d946ef', omo: '#7c3aed', dsh: '#06b6d4',
-  commandcode: '#f97316', mimocode: '#3b82f6', deveco: '#3c99cc',
-};
-const FALLBACK_COLORS = ['#8b5cf6', '#22c55e', '#0d9488', '#0891b2', '#ca8a04', '#db2777', '#2563eb', '#65a30d'];
-
-function agentColor(agent) {
-  const id = String(agent || '').toLowerCase();
-  if (ROUTE_COLORS[id]) return ROUTE_COLORS[id];
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
-  return FALLBACK_COLORS[hash % FALLBACK_COLORS.length];
-}
-
-
-
-function flightDisplayRoute(session) {
-  const route = session.route;
-  if (session.attempt < 0) return route;
-  const attempts = route.tries || [];
-  const attempt = attempts[session.attempt];
-  if (!attempt) return route;
-  return { ...route, tries: attempts.slice(0, session.attempt + 1),
-    done: Boolean(route.done && session.attempt === attempts.length - 1),
-    status: attempt.status || 0, error: attempt.error || '', model: attempt.model || route.model };
-}
-
-function routingNow() {
-  if (lastTrace !== clockTrace) {
-    clockTrace = lastTrace;
-    const stamp = Date.parse(lastTrace?.now);
-    gatewayClockOffset = Number.isFinite(stamp) ? stamp - Date.now() : 0;
-  }
-  return Date.now() + gatewayClockOffset;
-}
-
-function scheduleStageExpiry(expiry, now) {
-  clearTimeout(stageExpiryTimer);
-  stageExpiryTimer = 0;
-  if (Number.isFinite(expiry)) stageExpiryTimer = window.setTimeout(() => {
-    stageExpiryTimer = 0;
-    render();
-  }, Math.min(2147483647, Math.max(1, expiry - now + 1)));
-}
-
-function requestsOnWire() {
-  return new Set([...flights.values()].filter(flight => flight.active
-    && flight.playback.attempt >= 0 && flight.holding !== 'hub').map(flight => flight.routeId));
-}
-
-function applyRoutingState(agent, account, routes) {
-  const moving = requestsOnWire(), now = routingNow();
-  agent.dataset.wireState = wireState(routes, 'in', moving, now);
-  account.dataset.wireState = wireState(routes, 'out', moving, now);
-}
-
-function visibleFlightGroups(routes) {
-  const groups = groupRequests(routes, { includeCompleted: true });
-  if (groups.length <= 4) return { groups, visible: groups };
-  const rest = groups.slice(3);
-  const mergedRoutes = rest.flatMap(group => group.routes);
-  const accounts = new Set(mergedRoutes.map(route => `${route.provider || ''}/${route.tries?.at(-1)?.id || route.order?.[0]?.id || ''}`));
-  const overflow = { ...rest[0], key: 'overflow', routes: mergedRoutes, overflow: rest.length,
-    context: `${mergedRoutes.length} 条请求`, accountCount: accounts.size,
-    modelCount: new Set(mergedRoutes.map(route => route.model)).size,
-    pendingAccounts: rest.reduce((sum, group) => sum + group.pendingAccounts, 0) };
-  return { groups, visible: [...groups.slice(0, 3), overflow] };
-}
-
-function sessionGroups() {
-  return new Map(groupRequests(lastTrace?.routes || [], { includeCompleted: true })
-    .map(group => [group.key, group]));
-}
-
-function modeSvg(paths) {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 16');
-  svg.setAttribute('aria-hidden', 'true');
-  for (const [tag, attributes] of paths) {
-    const node = document.createElementNS(SVG_NS, tag);
-    for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
-    svg.append(node);
-  }
-  return svg;
-}
-
-function renderRequestModes(target, modes, visible = true) {
-  target.replaceChildren();
-  target.hidden = !visible;
-  if (!visible) return;
-  const value = modes || projectRequestModes(null);
-  const speed = create('span', 'mode-icon mode-speed');
-  speed.dataset.mode = value.requestSpeedKind || 'unknown';
-  speed.setAttribute('role', 'img');
-  speed.setAttribute('aria-label', value.requestSpeedValue
-    ? `${value.requestSource.speed === 'sent' ? '发送' : '请求'}速度：${value.requestSpeedKind === 'fast' ? 'Fast' : value.requestSpeedValue}`
-    : '速度模式未提供');
-  speed.append(modeSvg([['path', { d: 'M13.5 1 6 9h5l-1 6 8-9h-5z', class: 'speed-bolt' }]]));
-  const effort = create('span', 'mode-icon mode-effort', value.requestEffortValue);
-  effort.dataset.effort = value.requestEffortValue || 'unknown';
-  effort.setAttribute('aria-label', value.requestEffortValue
-    ? `${value.requestSource.effort === 'sent' ? '发送' : '请求'}思考强度：${value.requestEffortValue}`
-    : '思考强度未提供');
-  if (value.requestSpeedKind) target.append(speed);
-  if (value.requestEffortValue) target.append(effort);
-  target.hidden = target.childElementCount === 0;
-}
-
-function renderMulti(routes, totals) {
-  setMulti(true);
-  const activeCount = (lastTrace?.routes || []).filter(isInFlight).length;
-  setLiveChrome({ inFlight: activeCount > 0 || requestsOnWire().size > 0 });
-
-  const { groups, visible } = visibleFlightGroups(routes);
-  const sessions = sessionGroups();
-  const count = visible.length;
-  // The card and the lower half are fixed. The fan gets 134px, so more
-  // agents means shorter rows, not a taller window.
-  const available = 134;
-  const gap = count <= 2 ? 8 : count === 3 ? 3 : 2;
-  const maxNode = count === 1 ? 80 : count === 2 ? 65 : count === 3 ? 44 : 33;
-  const nodeHeight = Math.max(
-    18,
-    Math.min(maxNode, Math.floor((available - gap * (count - 1)) / count)),
+  // 耗时拆解 still means what it always did: show the measured timing, or a
+  // dash when magpie did not report one.
+  const timing = settings.showTiming !== false;
+  node.append(
+    name,
+    state,
+    create('span', 'col-ms mono', timing ? formatDuration(row.ms) : '—'),
+    create('span', 'col-ttft mono', timing ? formatLatency(row.ttft) : '—'),
+    create('span', 'col-speed mono', timing && row.speed !== null ? `${Math.round(row.speed)} tok/s` : '—'),
   );
-  el.fan.style.setProperty('--fan-node-h', `${nodeHeight}px`);
-  el.fan.style.setProperty('--fan-gap', `${gap}px`);
-  el.fan.classList.toggle('dense', count >= 3);
-  el.fan.classList.toggle('tight', count >= 2);
-  el.fan.classList.toggle('crowded', count >= 3);
-  el.fan.classList.toggle('ultra', count >= 4);
-  el.fan.classList.toggle('micro', count >= 5);
-
-  el.lanesTitle.textContent = activeCount ? `${activeCount} 个请求正在执行`
-    : flightBook.sessions.size ? '请求结果返回中' : '最近完成的请求';
-  el.lanesSub.textContent = `${groups.length} 组 · 按 Agent / 会话`;
-  renderStory(present(chooseLatest(routes), totals, Boolean(settings.maskAccounts)));
-
-  setParts(el.caption, [
-    { text: `${routes.length} 条请求 · ${groups.length} 组`, role: 'strong' },
-    { text: ' · 按 Agent / 会话合并显示。', role: 'muted' },
-  ]);
-
-  const ids = new Set(visible.map(group => String(group.route.id)));
-  for (const id of [...seenRoutes]) {
-    if (!ids.has(id)) seenRoutes.delete(id);
-  }
-
-  const agentRows = [], accountRows = [];
-  const agentNodes = new Map();
-  for (const group of visible) {
-    const route = group.route;
-    const id = String(route.id);
-    const fresh = !seenRoutes.has(id);
-    if (fresh) seenRoutes.add(id);
-    const view = present(route, totals, Boolean(settings.maskAccounts));
-    view.agentName = group.overflow ? `其余 ${group.overflow} 组` : view.agentName + (group.routes.length > 1 ? ` · ${group.routes.length}` : '');
-    view.agentModel = group.context;
-    view.modes = group.overflow ? null : sessions.get(group.key)?.modes || group.modes;
-    view.hideModes = Boolean(group.overflow);
-    const color = agentColor(route.agent);
-    const next = buildFanAgent(route, view, fresh, color);
-    next.dataset.layoutKey = `agent:${group.key}`;
-    const node = reuseRoutingNode(el.fanAgents, next);
-    agentNodes.set(group.key, node);
-    agentRows.push(node);
-  }
-  // The account column has its own order, as it does in magpie: a request
-  // does not sit level with its account, so the wires cross through the hub.
-  const accountOrder = visible.slice().sort((a, b) => accountCompare(a.route, b.route));
-  for (const group of accountOrder) {
-    const route = group.route;
-    const id = String(route.id);
-    const fresh = !seenRoutes.has(id);
-    const view = present(route, totals, Boolean(settings.maskAccounts));
-    if (group.routes.length > 1) {
-      view.accountName = group.accountCount > 1 ? `${group.accountCount} 个账号`
-        : group.accountCount === 0 ? '等待账号' : view.accountName;
-      view.accountState = `${group.routes.length} 条请求${group.pendingAccounts ? ` · ${group.pendingAccounts} 待选` : ''}`;
-      if (group.modelCount > 1) view.accountModel = `${group.modelCount} 个模型`;
-    }
-    const color = agentColor(route.agent);
-    const next = buildFanAccount(route, view, fresh, color, group.routes.length);
-    next.dataset.layoutKey = `account:${group.key}`;
-    const node = reuseRoutingNode(el.fanAccounts, next);
-    accountRows.push(node);
-    applyRoutingState(agentNodes.get(group.key), node, group.routes);
-    for (const member of group.routes) flightAnchors.set(String(member.id), {
-      agent: agentNodes.get(group.key), account: node, hub: el.fanHub.querySelector('.hub-card'),
-    });
-  }
-  placeRoutingNodes(el.fanAgents, agentRows);
-  placeRoutingNodes(el.fanAccounts, accountRows);
-
-  animateNumber(el.statRequests, Number(totals?.requests) || 0);
-  animateNumber(el.statRerouted, Number(totals?.rerouted) || 0);
-  animateNumber(el.statErrors, Number(totals?.errors) || 0);
-
-  applyUsageTokens();
-  el.accountToken.hidden = true;
-
-  requestAnimationFrame(() => {
-    drawFanWires();
-    reportHitAreas();
-    setTimeout(drawFanWires, 80);
-  });
+  const tip = rowTip(row);
+  if (tip) node.title = tip;
+  return node;
 }
 
-function buildFanAgent(route, view, fresh, color) {
-  const agent = create('section', `node agent${fresh ? ' fresh' : ''}`);
-  agent.dataset.id = String(route.id);
-  agent.style.setProperty('--route', color);
-  const icon = create('div', 'agent-icon');
-  icon.append(agentMark(view.agentId, view.agentGlyph));
-  agent.append(icon);
-
-  const copy = create('div', 'agent-copy');
-  const line = create('div', 'agent-line');
-  line.append(create('i', 'status-dot'));
-  line.append(create('b', '', view.agentName));
-  copy.append(line, create('div', 'mono model', view.agentModel));
-  const modes = create('div', 'request-modes');
-  renderRequestModes(modes, view.modes, !view.hideModes);
-  copy.append(modes);
-  agent.classList.toggle('has-modes', !modes.hidden);
-  agent.append(copy);
-  return agent;
-}
-
-function buildFanAccount(route, view, fresh, color, requestCount = 1) {
-  const kind = stateClass(view);
-  const account = create('section', `node account${fresh ? ' fresh' : ''}`);
-  account.dataset.id = String(route.id);
-  account.dataset.state = kind;
-  account.style.setProperty('--route', color);
-  if (kind === 'failed') account.classList.add('failed');
-  else if (kind === 'inflight') account.classList.add('inflight');
-  else account.classList.add('done');
-
-  const top = create('div', 'account-top');
-  const accountDot = create('i');
-  setStatusDot(accountDot, 'account');
-  const icon = create('span', 'provider-icon');
-  icon.append(providerMark(view.providerIcon));
-  top.append(accountDot, icon, create('b', 'account-name', view.accountName));
-
-  const mid = create('div', 'account-mid');
-  mid.append(create('span', 'mono model-chip', view.accountModel));
-  const plan = create('span', 'plan', view.accountPlan || '');
-  plan.hidden = !view.accountPlan;
-  mid.append(plan);
-
-  const state = create('div', 'account-state');
-  const stateDotEl = create('i');
-  setStatusDot(stateDotEl, stateDotClass(kind));
-  state.append(stateDotEl, create('span', '', view.accountState));
-
-  const metrics = accountDetail(view, true);
-  const detail = create('div', 'account-token', (requestCount > 1 && metrics.detail ? '本条 ' : '') + metrics.detail);
-  detail.hidden = !metrics.detail;
-  account.classList.toggle('has-metrics', Boolean(metrics.detail));
-  account.title = [view.accountModel, view.accountState,
-    requestCount > 1 ? `本组共 ${requestCount} 条请求；以下数据属于本条请求 #${route.id}` : '',
-    metrics.title].filter(Boolean).join('\n');
-  account.append(top, mid, state, detail);
-  return account;
-}
-
-function drawFanWires() {
-  if (!document.body.classList.contains('multi')) return;
-  const fan = el.fan.getBoundingClientRect();
-  if (fan.width < 10 || fan.height < 10) return;
-
-  const hubCard = el.fanHub.querySelector('.hub-card')?.getBoundingClientRect();
-  if (!hubCard) return;
-
-  const agents = [...el.fanAgents.children];
-  const accounts = [...el.fanAccounts.children];
-  if (!agents.length || !accounts.length) return;
-
-  el.fanWires.setAttribute('viewBox', `0 0 ${fan.width} ${fan.height}`);
-  el.fanWires.setAttribute('width', String(fan.width));
-  el.fanWires.setAttribute('height', String(fan.height));
-
-  const hubLeft = hubCard.left - fan.left;
-  const hubRight = hubCard.right - fan.left;
-  const hubY = hubCard.top - fan.top + hubCard.height / 2;
+function renderModelList(rows, hiddenCount) {
+  rowsShown = rows.length;
+  el.modelRows.textContent = '';
   const fragment = document.createDocumentFragment();
-
-  // Stable per-request phases survive redraws and changes in lane order.
-  const flowCycle = 700;
-  const now = performance.now();
-  const wire = (d, color, fresh, endX, endY, key, outgoing, state) => {
-    let seed = 0;
-    for (const char of String(key)) seed = (seed * 31 + char.charCodeAt(0)) >>> 0;
-    const phase = -((now + seed % flowCycle + (outgoing ? 600 : 0)) % flowCycle) / 1000;
-    const link = document.createElementNS(SVG_NS, 'g');
-    link.setAttribute('class', `fan-link${fresh ? ' fresh' : ''}`);
-    link.dataset.route = key;
-    link.dataset.side = outgoing ? 'out' : 'in';
-    link.dataset.state = state || 'idle';
-    link.style.setProperty('--route', color);
-    link.style.setProperty('--flow', `${phase.toFixed(3)}s`);
-
-    for (const className of ['fan-wire-under', 'fan-wire-track', 'fan-wire-path']) {
-      const path = document.createElementNS(SVG_NS, 'path');
-      path.setAttribute('class', className);
-      path.setAttribute('d', d);
-      link.append(path);
-    }
-
-    const port = document.createElementNS(SVG_NS, 'circle');
-    port.setAttribute('class', 'fan-wire-port');
-    port.setAttribute('cx', String(endX));
-    port.setAttribute('cy', String(endY));
-    port.setAttribute('r', '3.2');
-    link.append(port);
-
-    const end = document.createElementNS(SVG_NS, 'circle');
-    end.setAttribute('class', 'fan-wire-end');
-    end.setAttribute('cx', String(endX));
-    end.setAttribute('cy', String(endY));
-    end.setAttribute('r', '1.3');
-    link.append(end);
-    fragment.append(link);
-  };
-
-  // Every source joins the same point on magpie; every account leaves the
-  // same point on the other side. Accounts keep their own column order, so
-  // a wire can cross another on its way through the hub.
-  for (const agent of agents) {
-    const rect = agent.getBoundingClientRect();
-    const color = agent.style.getPropertyValue('--route') || '#A18BFF';
-    const fresh = agent.classList.contains('fresh');
-    const ax = rect.right - fan.left;
-    const ay = rect.top - fan.top + rect.height / 2;
-    const d = wireCurve({ x: ax, y: ay }, { x: hubLeft, y: hubY });
-    wire(d, color, fresh, ax, ay, agent.dataset.id, false, agent.dataset.wireState);
-  }
-
-  for (const account of accounts) {
-    const rect = account.getBoundingClientRect();
-    const color = account.style.getPropertyValue('--route') || '#A18BFF';
-    const fresh = account.classList.contains('fresh');
-    const cx = rect.left - fan.left;
-    const cy = rect.top - fan.top + rect.height / 2;
-    const d = wireCurve({ x: hubRight, y: hubY }, { x: cx, y: cy });
-    wire(d, color, fresh, cx, cy, account.dataset.id, true, account.dataset.wireState);
-  }
-
-  el.fanWires.replaceChildren(fragment);
-}
-
-function drawSingleWires() {
-  const svg = $('singleWires');
-  if (document.body.classList.contains('multi')) return;
-  const stage = svg.parentElement.getBoundingClientRect();
-  if (!stage.width || !stage.height) return;
-  const hub = el.hub.querySelector('.hub-card').getBoundingClientRect();
-  const agent = el.agentNode.getBoundingClientRect(), account = el.accountNode.getBoundingClientRect();
-  const y = (hub.top + hub.bottom) / 2 - stage.top;
-  const definitions = [
-    wireCurve({ x: agent.right - stage.left, y: (agent.top + agent.bottom) / 2 - stage.top }, { x: hub.left - stage.left, y }),
-    wireCurve({ x: hub.right - stage.left, y }, { x: account.left - stage.left, y: (account.top + account.bottom) / 2 - stage.top }),
-  ];
-  svg.setAttribute('viewBox', `0 0 ${stage.width} ${stage.height}`);
-  svg.style.setProperty('--route', el.agentNode.style.getPropertyValue('--route'));
-  svg.classList.toggle('active', el.wireIn.classList.contains('active'));
-  if (!svg.children.length) {
-    for (const side of ['in', 'out']) {
-      const group = document.createElementNS(SVG_NS, 'g');
-      group.dataset.side = side;
-      for (const kind of ['fan-wire-under', 'fan-wire-track', 'fan-wire-path']) {
-        const path = document.createElementNS(SVG_NS, 'path');
-        path.setAttribute('class', kind); group.append(path);
-      }
-      svg.append(group);
-    }
-  }
-  [...svg.children].forEach((group, index) => {
-    group.dataset.state = (index ? el.accountNode : el.agentNode).dataset.wireState || 'idle';
-    for (const path of group.children) path.setAttribute('d', definitions[index]);
-  });
-}
-
-function stateDotClass(kind) {
-  return kind === 'failed' ? 'bad' : kind === 'done' ? 'good' : 'accent';
-}
-
-function renderStory(view) {
-  const lines = view.story || [];
-  if (lines.length === 0) {
-    setParts(el.stories[0], [{ text: '还没有请求经过 magpie。', role: 'muted' }]);
-    setParts(el.stories[1], [{ text: '从任意 Agent 发一条消息，这里会实时展开。', role: 'muted' }]);
-    el.storyRows[0].hidden = false;
-    el.storyRows[1].hidden = false;
-    el.storyRows[2].hidden = true;
-    el.storyTime.textContent = '';
-    el.storyTime.hidden = true;
-    return;
-  }
-
-  for (let i = 0; i < 3; i++) {
-    const row = el.storyRows[i];
-    const line = lines[i];
-    row.hidden = !line;
-    row.classList.remove('pulse', 'failed', 'done');
-    if (!line) continue;
-    if (i === 2) {
-      if (line.bullet === 'pulse') row.classList.add('pulse');
-      if (line.bullet === 'failed') row.classList.add('failed');
-      if (line.bullet === 'done') row.classList.add('done');
-    }
-    setParts(el.stories[i], line.parts);
-  }
-
-  el.storyTime.textContent = view.timeText || '';
-  el.storyTime.hidden = !view.timeText;
+  for (const row of rows) fragment.append(modelRowNode(row));
+  el.modelRows.append(fragment);
+  el.modelEmpty.hidden = rows.length > 0;
+  el.modelHidden.hidden = hiddenCount <= 0;
+  el.modelHidden.textContent = hiddenCount > 0 ? `+${hiddenCount} 个模型` : '';
 }
 
 function render() {
-  const before = captureRoutingLayout();
-  renderRoutingContent();
-  animateRoutingLayout(before);
-}
-
-function renderRoutingContent() {
   const routes = Array.isArray(lastTrace?.routes) ? lastTrace.routes : [];
-  const active = routes.filter(isInFlight);
-  flightBook.update(lastTrace, connection.online && !motionReduced() && !frame.compact);
-  flightAnchors.clear();
-  $('compactStatus').textContent = connection.online ? active.length ? `${active.length} 个请求进行中` : '已连接 · 空闲' : connection.retry ? '自动重连中' : '未连接';
-  $('compactLiveDot').classList.toggle('online', Boolean(connection.online));
-  if (!connection.online || !lastTrace) {
-    stopFlights();
-    scheduleStageExpiry(Infinity, routingNow());
-    el.agentNode.dataset.wireState = 'idle';
-    el.accountNode.dataset.wireState = 'idle';
-    const waiting = !connection.detail || connection.detail === '正在连接' || connection.detail === '正在重新连接';
-    renderView(!connection.online ? waiting ? connecting(lastTrace?.totals)
-      : offline(connection.detail, settings.gateway, lastTrace?.totals) : empty(undefined));
-    return;
+  const active = routes.filter(routeActive);
+  const online = Boolean(connection.online && lastTrace);
+  if (online) {
+    document.body.classList.remove('stale');
+    el.modelEmpty.hidden = true;
+    const { rows, hiddenCount } = modelSessionRows(routes, { limit: ROW_LIMIT });
+    renderModelList(rows, hiddenCount);
+  } else {
+    // A dropped gateway keeps the last frame on screen and labels it stale
+    // rather than blanking a list the user is reading.
+    el.modelEmpty.hidden = rowsShown > 0;
+    el.modelHidden.hidden = true;
+    document.body.classList.toggle('stale', rowsShown > 0);
   }
-
-  const now = routingNow();
-  const stage = stagedRoutes(routes, new Set(flightBook.sessions.keys()), now);
-  const displayed = new Map(stage.routes.map(route => [String(route.id), route]));
-  for (const session of flightBook.sessions.values()) {
-    if (session.active) displayed.set(session.id, flightDisplayRoute(session));
-  }
-  const visible = [...displayed.values()];
-  scheduleStageExpiry(Math.min(stage.nextExpiry, nextRestExpiry(visible, now)), now);
-  if (visible.length >= 2) renderMulti(visible, lastTrace.totals);
-  else {
-    const route = visible[0] || chooseLatest(routes);
-    const key = route ? requestGroupKey(route) : 'empty';
-    el.agentNode.dataset.layoutKey = `agent:${key}`;
-    el.accountNode.dataset.layoutKey = `account:${key}`;
-    const view = present(route, lastTrace.totals, Boolean(settings.maskAccounts));
-    const group = sessionGroups().get(key);
-    view.modes = group?.modes;
-    if (group) view.agentModel = group.context;
-    renderView(view,
-      route ? agentColor(route.agent) : '#a18bff');
-    applyRoutingState(el.agentNode, el.accountNode, route ? [route] : []);
-    if (route) flightAnchors.set(String(route.id), {
-      agent: el.agentNode, account: el.accountNode, hub: el.hub.querySelector('.hub-card'),
-    });
-  }
-  syncFlights();
-}
-
-function isInFlight(route) {
-  return requestActive(route);
-}
-
-function stamp(route) {
-  const time = new Date(route.time).getTime();
-  return Number.isFinite(time) ? time : 0;
-}
-
-function accountCompare(a, b) {
-  const provider = (route) => String(route.provider || '').toLowerCase();
-  const account = (route) => {
-    const tries = Array.isArray(route.tries) ? route.tries : [];
-    const last = tries[tries.length - 1];
-    return String(route.served || route.account || last?.who || '').toLowerCase();
-  };
-  const byProvider = provider(b).localeCompare(provider(a));
-  if (byProvider !== 0) return byProvider;
-  return account(a).localeCompare(account(b));
-}
-
-function chooseLatest(routes) {
-  return routes.slice().sort((a, b) => stamp(b) - stamp(a))[0] || null;
+  setLiveChrome({ inFlight: active.length > 0 });
+  $('compactStatus').textContent = online
+    ? (active.length ? `${active.length} 个请求进行中` : '已连接 · 空闲')
+    : connection.retry ? '自动重连中' : '未连接';
+  $('compactLiveDot').classList.toggle('online', online);
 }
 
 function setLayout(on) {
@@ -2363,7 +1167,6 @@ async function boot() {
     renderUsageStatus();
   });
 
-  new ResizeObserver(() => requestAnimationFrame(drawFanWires)).observe(el.fan);
   new ResizeObserver(() => requestAnimationFrame(applyUiScale)).observe(el.stageArea);
   applyUiScale();
 
@@ -2373,7 +1176,6 @@ async function boot() {
 
   window.addEventListener('dragover', (event) => event.preventDefault());
   window.addEventListener('drop', (event) => event.preventDefault());
-  window.addEventListener('beforeunload', () => { clearTimeout(stageExpiryTimer); stopFlights(); });
   reducedMotion.addEventListener('change', render);
   setupDragBar();
   setupDragBar($('compactDragBar'));

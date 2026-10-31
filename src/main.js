@@ -108,7 +108,7 @@ let aliveTimer = null;
 let pauseTimer = null;
 let compactPosition = null;
 let screenChangeTimer = null;
-let frame = { lanes: 1, cardHeight: 400, windowHeight: 432 };
+let frame = { cardHeight: 400, windowHeight: 432 };
 
 function log(message) {
   try {
@@ -149,9 +149,7 @@ function defaults() {
     enabledPeriods: [...USAGE_PERIODS],
     pillMetric: 'total',
     rollTokens: true,
-    showQuota: true,
     showTiming: true,
-    hubEffect: 'ripple',
     keepAlive: true,
     pauseUntil: 0,
     compact: false,
@@ -182,16 +180,6 @@ function normalizePeriods(value) {
 function normalizeMetric(value) {
   const metric = String(value || '').toLowerCase();
   return PILL_METRICS.includes(metric) ? metric : 'total';
-}
-
-// How the card answers a request crossing magpie: the staged effects the
-// preview page showed, plus 无 to switch the gesture off entirely. Ripple
-// stays the default because it is the quietest.
-const HUB_EFFECTS = ['none', 'ripple', 'vortex', 'dissolve', 'arc'];
-
-function normalizeHubEffect(value) {
-  const effect = String(value || '').toLowerCase();
-  return HUB_EFFECTS.includes(effect) ? effect : 'ripple';
 }
 
 // How the desktop app takes a newer release: on idle, only after the user
@@ -240,9 +228,7 @@ function loadSettings() {
       enabledPeriods,
       pillMetric: normalizeMetric(parsed.pillMetric),
       rollTokens: parsed.rollTokens !== false,
-      showQuota: parsed.showQuota !== false,
       showTiming: parsed.showTiming !== false,
-      hubEffect: normalizeHubEffect(parsed.hubEffect),
       keepAlive: parsed.keepAlive !== false,
       autostart: parsed.autostart === true,
       // An old install only had the on/off check: it means `never'' now.
@@ -490,9 +476,7 @@ function publicSettings() {
     enabledPeriods: settings.enabledPeriods,
     pillMetric: settings.pillMetric,
     rollTokens: settings.rollTokens !== false,
-    showQuota: settings.showQuota !== false,
     showTiming: settings.showTiming !== false,
-    hubEffect: settings.hubEffect,
     compact: Boolean(settings.compact),
     quietMotion: Boolean(settings.quietMotion),
   };
@@ -1247,11 +1231,11 @@ function activeCount(routes) {
   )).length;
 }
 
-function fitWindow(lanes) {
-  // Agent count never resizes the window. Only the user's resize handle can.
+function fitWindow() {
+  // The list never resizes the window; only the user's resize handle can.
   if (!win || win.isDestroyed()) return;
   const bounds = win.getBounds();
-  frame = { ...frame, lanes, cardHeight: bounds.height - 32, windowHeight: bounds.height };
+  frame = { ...frame, cardHeight: bounds.height - 32, windowHeight: bounds.height };
   send('magpie:frame', frame);
 }
 
@@ -1448,7 +1432,7 @@ class TraceClient {
         lastTrace = snapshot;
         if (data.routes?.length || activeCount(snapshot.routes) > 0) markActivity();
         connection = { online: true, detail: this.base, at: Date.now() };
-        fitWindow(activeCount(snapshot.routes));
+        fitWindow();
         send('magpie:trace', snapshot);
         send('magpie:connection', connection);
       } catch (error) {
@@ -1470,7 +1454,7 @@ class TraceClient {
           this.routes.clear();
         }
         connection = { online: false, detail, retry: true, at: Date.now() };
-        fitWindow(0);
+        fitWindow();
         send('magpie:connection', connection);
         // Back off instead of hammering a gateway that is down: 1 s, 2 s, 4 s,
         // then a steady 5 s. The card shows "重连中" while the loop retries,
@@ -1809,13 +1793,9 @@ ipcMain.handle('settings:save', (_event, input) => {
       rollTokens: data.rollTokens === undefined
         ? settings.rollTokens !== false
         : Boolean(data.rollTokens),
-      showQuota: data.showQuota === undefined
-        ? settings.showQuota !== false
-        : Boolean(data.showQuota),
       showTiming: data.showTiming === undefined
         ? settings.showTiming !== false
         : Boolean(data.showTiming),
-      hubEffect: normalizeHubEffect(data.hubEffect ?? settings.hubEffect),
       keepAlive: data.keepAlive === undefined
         ? settings.keepAlive !== false
         : Boolean(data.keepAlive),
@@ -1846,7 +1826,6 @@ ipcMain.handle('settings:save', (_event, input) => {
         settings.top = bounds.y;
         frame = {
           ...frame,
-          lanes: frame.lanes,
           cardHeight: settings.height - 32,
           windowHeight: settings.height,
         };
