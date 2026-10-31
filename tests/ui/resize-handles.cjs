@@ -10,6 +10,7 @@ let win,visible=false,ignored=true,cursor={x:-10000,y:-10000},finished=false,las
 const checks=[],probes=[],errors=[],sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const server=http.createServer((req,res)=>{setTimeout(()=>{if(res.destroyed)return;res.setHeader('Content-Type','application/json');res.end(JSON.stringify(req.url.includes('/usage')?{period:'today',calls:0,input:0,output:0}:{pid:1,seq:1,totals:{requests:0},routes:[]}));},req.url.includes('wait=')?100:0);});
 app.on('browser-window-created',(_event,created)=>{
+ if(win)return;
  win=created;win.showInactive=()=>{visible=true;win.emit('show');};win.isVisible=()=>visible;
  win.hide=()=>{visible=false;win.emit('hide');};win.focus=()=>{};win.blur=()=>win.emit('blur');
  const ignore=win.setIgnoreMouseEvents.bind(win);

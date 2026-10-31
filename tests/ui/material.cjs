@@ -32,6 +32,9 @@ const server = http.createServer((req, res) => {
   setTimeout(() => { if(!res.destroyed){ res.writeHead(200, {'Content-Type':'application/json'}); res.end(JSON.stringify(data)); } }, req.url.includes('wait=') ? 100 : 0);
 });
 app.on('browser-window-created', (_event, created) => {
+  // Only the card is stubbed; a later window (the request detail) keeps its own
+  // native behaviour and must not take over `win`.
+  if (win) return;
   win = created;
   // Exercise main + preload + renderer together without showing a second
   // desktop widget or moving focus away from the user's current application.

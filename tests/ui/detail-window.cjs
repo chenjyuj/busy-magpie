@@ -40,6 +40,7 @@ async function detailJs(code) {
 // The gateway the app actually polls: whatever `feed()` last parked here is
 // what main merges into the table it pushes on to both windows.
 let servedRoutes = [];
+let servedPid = 12345;
 let traceSeq = 0;
 const server = http.createServer((req, res) => {
   if (req.url.includes('/usage')) {
@@ -48,7 +49,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   traceSeq += 1;
-  const body = { seq: traceSeq, pid: 12345, totals: { requests: servedRoutes.length, rerouted: 0, errors: 0 }, routes: servedRoutes };
+  const body = { seq: traceSeq, pid: servedPid, totals: { requests: servedRoutes.length, rerouted: 0, errors: 0 }, routes: servedRoutes };
   // A short pause stands in for magpie's long poll, so the app is not spinning.
   setTimeout(() => {
     if (res.destroyed) return;
@@ -94,11 +95,12 @@ async function run() {
     const push = card.webContents.send.bind(card.webContents);
     card.webContents.send = (channel, ...args) => ['magpie:trace', 'magpie:connection', 'magpie:usage', 'magpie:usage-status'].includes(channel)
       ? undefined : push(channel, ...args);
-    const feed = async list => {
+    const feed = async (list, options = {}) => {
       servedRoutes = list;
+      if (options.pid) servedPid = options.pid;
       // The card is fed directly so its own assertions stay deterministic;
       // main's poll also carries the list to the detail window within a beat.
-      push('magpie:trace', { pid: 12345, seq: 40, now: new Date().toISOString(), totals: { requests: list.length }, routes: list });
+      push('magpie:trace', { pid: servedPid, seq: 40, now: new Date().toISOString(), totals: { requests: list.length }, routes: list });
       push('magpie:connection', { online: true, detail: '127.0.0.1:3425' });
       await sleep(700);
     };
@@ -156,6 +158,112 @@ async function run() {
     await sleep(500);
     assert.equal(BrowserWindow.getAllWindows().length, 1, 'Escape closes the detail window');
     record('Escape closes the detail window');
+
+    // ── T6: paging, live updates, following and closing ─────────────────────
+    const clickRow = async model => {
+      const hit = await cardJs(`(()=>{const rows=[...document.querySelectorAll('.model-row')];
+        const row=rows.find(item=>item.dataset.model===${JSON.stringify(model)});
+        if(!row) return false; row.click(); return true;})()`);
+      assert.ok(hit, `the card lists a row for ${model}`);
+      await sleep(700);
+    };
+    const rowCount = () => detailJs('document.querySelectorAll(".detail-row").length');
+    const moreHidden = () => detailJs('document.getElementById("detailMore").hidden');
+
+    const many = [];
+    for (let id = 25; id >= 1; id -= 1) many.push(request(id));
+    await feed(many);
+    await clickRow('glm-5.3');
+    assert.equal(await rowCount(), 20, 'the first page holds twenty rows');
+    assert.equal(await moreHidden(), false, 'more is offered while older requests remain');
+    await detailJs('document.getElementById("detailMore").click()');
+    await sleep(300);
+    assert.equal(await rowCount(), 25, 'the next page adds twenty more');
+    assert.equal(await moreHidden(), true, 'the button goes away once the list is complete');
+    record('twenty rows a page, with the rest on demand');
+
+    // More requests than the loaded window: the window holds, the newest lands on top.
+    const lots = [];
+    for (let id = 45; id >= 1; id -= 1) lots.push(request(id));
+    await feed(lots);
+    await sleep(700);
+    const windowed = await detailJs(`(()=>{const rows=[...document.querySelectorAll('.detail-row')];
+      return { count: rows.length, first: rows[0].dataset.id, more: document.getElementById('detailMore').hidden,
+        last: rows[rows.length - 1].dataset.id };})()`);
+    assert.equal(windowed.count, 40, 'two loaded pages stay two loaded pages');
+    assert.equal(windowed.first, '1', 'the newest request is on top');
+    assert.equal(windowed.more, false, 'and the ones that fell outside are offered again');
+    record('a newer request slides in on top without resizing the loaded window');
+
+    // A request still in flight shows its own gaps, never the last completed numbers.
+    await feed([request(0, { done: false, status: 0, ms: 0, ttft: 0, out: 0, tries: [{ id: 'acct-1', model: 'glm-5.3', done: false, status: 0 }] }), ...lots]);
+    await sleep(700);
+    const inflight = await detailJs(`(()=>{const r=document.querySelector('.detail-row');
+      return { id: r.dataset.id, status: r.dataset.status, ms: r.querySelector('.col-ms').textContent,
+        ttft: r.querySelector('.col-ttft').textContent, speed: r.querySelector('.col-speed').textContent,
+        state: r.querySelector('.col-state').textContent };})()`);
+    assert.equal(inflight.id, '0');
+    assert.equal(inflight.status, 'live');
+    assert.equal(inflight.ms, '—', 'an in-flight request reports no duration of its own');
+    assert.equal(inflight.ttft, '—');
+    assert.equal(inflight.speed, '—');
+    assert.equal(inflight.state, '进行中');
+    record('an in-flight row shows its own gaps instead of the last completed numbers');
+
+    // The window rides along when the card moves.
+    const work = screen.getDisplayMatching(card.getBounds()).workArea;
+    card.setBounds({ x: work.x + 40, y: work.y + 60, width: card.getBounds().width, height: card.getBounds().height });
+    await sleep(400);
+    const anchored = { card: card.getBounds(), detail: detail().getBounds() };
+    card.setBounds({ x: work.x + 20, y: work.y + 90, width: anchored.card.width, height: anchored.card.height });
+    await sleep(400);
+    const moved = { card: card.getBounds(), detail: detail().getBounds() };
+    assert.equal(moved.card.x - anchored.card.x, -20, 'the card went where it was told');
+    assert.ok(Math.abs((moved.detail.x - anchored.detail.x) - (moved.card.x - anchored.card.x)) <= 2,
+      `the detail window follows in x (${anchored.detail.x} -> ${moved.detail.x})`);
+    assert.ok(Math.abs((moved.detail.y - anchored.detail.y) - (moved.card.y - anchored.card.y)) <= 2,
+      `the detail window follows in y (${anchored.detail.y} -> ${moved.detail.y})`);
+    if (moved.card.x + moved.card.width + 12 + moved.detail.width <= work.x + work.width) {
+      assert.equal(moved.detail.x, moved.card.x + moved.card.width + 12, 'it sits beside the card when there is room');
+    }
+    record('the detail window follows the card and sits beside it');
+
+    // A restarted magpie empties the merged table, so the list empties too
+    // instead of stranding rows for requests the gateway no longer knows.
+    await feed([], { pid: 99999 });
+    await sleep(700);
+    assert.equal(await rowCount(), 0, 'no rows survive a gateway restart');
+    assert.equal(await detailJs('document.getElementById("detailEmpty").hidden'), false, 'the empty note appears');
+    assert.equal(await moreHidden(), true);
+    record('a restarted gateway leaves an empty list, not stale rows');
+
+    // Closing: the button, then the card hiding.
+    await feed(many);
+    await clickRow('glm-5.3');
+    await detailJs('document.getElementById("detailClose").click()');
+    await sleep(400);
+    assert.equal(BrowserWindow.getAllWindows().length, 1, 'the close button closes the window');
+    await clickRow('glm-5.3');
+    card.hide();
+    await sleep(500);
+    assert.equal(BrowserWindow.getAllWindows().length, 1, 'hiding the card closes the detail window');
+    record('the close button and a hidden card both close the detail window');
+
+    // Another model reuses the same window and starts at its own first page.
+    await feed([...many, request(30, {
+      served: 'deepseek-v4.1-flash', model: 'officeace/deepseek-v4.1-flash', provider: 'officeace',
+      tries: [{ id: 'acct-1', model: 'deepseek-v4.1-flash', done: true, status: 200, ms: 2500, ttft: 500 }],
+      order: [{ id: 'acct-1', provider: 'officeace', name: 'OfficeAce', kind: 'account', who: 'alex@example.com',
+        model: 'deepseek-v4.1-flash', known: true, used: 11, amount: 5755, limit: 9600, unit: 'credits',
+        renews: ['2026-11-19T16:00:00Z'], usedRenews: '2026-11-19T16:00:00Z' }],
+    })]);
+    await clickRow('glm-5.3');
+    assert.equal(BrowserWindow.getAllWindows().length, 2);
+    await clickRow('deepseek-v4.1-flash');
+    assert.equal(BrowserWindow.getAllWindows().length, 2, 'switching models reuses the window');
+    assert.equal(await detailJs('document.getElementById("detailTitle").textContent'), 'OfficeAce · deepseek-v4.1-flash');
+    assert.equal(await rowCount(), 1, 'the new model starts at its own first page');
+    record('clicking another model swaps the list in the same window');
 
     assert.equal(errors.length, 0, errors.join('\n'));
     fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ ok: true, checks, rendererErrors: errors }, null, 2));

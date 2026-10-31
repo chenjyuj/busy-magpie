@@ -419,12 +419,16 @@ function createWindow() {
   });
 
   win.on('show', () => { refreshTrayMenu(); });
+  win.on('move', followDetailWindow);
+  win.on('resize', followDetailWindow);
   win.on('hide', () => {
     setQuickMenuOpen(false);
     if (settingsOpen) closeSettingsPanel();
     hoverInteractive = false;
     hoverKind = null;
     refreshTrayMenu();
+    // A hidden card leaves no reason for its detail window to sit on the desktop.
+    closeDetail();
   });
   win.on('blur', () => {
     setQuickMenuOpen(false);
@@ -713,6 +717,8 @@ async function installUpdate() {
   try {
     updateState.installing = true;
     updateState.downloading = false;
+    // The installer replaces the app folder the detail page is served from.
+    closeDetail();
     updateState.error = '';
     sendUpdateState();
     clearInterval(quietTimer);
@@ -765,6 +771,7 @@ function savePosition() {
 // merged route table it already keeps.
 let detailWin = null;
 let detailQuery = null;
+let detailFollowPending = false;
 
 function createDetailWindow() {
   detailWin = new BrowserWindow({
@@ -843,6 +850,17 @@ function closeDetail() {
   if (detailWin && !detailWin.isDestroyed()) detailWin.close();
   detailWin = null;
   detailQuery = null;
+}
+
+// Dragging or resizing the card moves the detail window with it. The events
+// arrive per pixel, so the re-placement waits for the next tick.
+function followDetailWindow() {
+  if (!detailWin || detailWin.isDestroyed() || detailFollowPending) return;
+  detailFollowPending = true;
+  setImmediate(() => {
+    detailFollowPending = false;
+    positionDetailWindow();
+  });
 }
 
 function applyTopmost() {
@@ -1747,6 +1765,7 @@ function createTray() {
 function quit() {
   if (!touchAlive(true)) log('quit: could not persist the manual stop marker');
   quitting = true;
+  closeDetail();
   clearTimeout(pauseTimer);
   clearTimeout(layoutTimer);
   clearInterval(hoverTimer);
