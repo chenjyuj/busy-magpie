@@ -33,6 +33,10 @@ const server = http.createServer((req, res) => {
   }, req.url.includes('wait=') ? 100 : 0);
 });
 app.on('browser-window-created', (_event, created) => {
+  // Only the first window is the card. A window created later (the request
+  // detail popup) must keep its real behaviour instead of being stubbed as if
+  // it were the card.
+  if (win) return;
   win = created;
   win.showInactive = () => { visible = true; win.emit('show'); };
   win.isVisible = () => visible;

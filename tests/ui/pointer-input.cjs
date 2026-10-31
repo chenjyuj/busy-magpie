@@ -185,6 +185,10 @@ server.listen(0, '127.0.0.1', async () => {
       back.showInactive();
     }
     app.on('browser-window-created', (_event, created) => {
+      // Only the first window is the card. A window created later (the request
+      // detail popup) must keep its real behaviour instead of being stubbed as
+      // if it were the card.
+      if (win) return;
       win = created;
       if (!native) {
         win.showInactive = () => { visible = true; win.emit('show'); };
