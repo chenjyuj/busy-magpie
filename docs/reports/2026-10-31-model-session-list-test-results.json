@@ -1,0 +1,161 @@
+{
+  "title": "busy-magpie 模型会话列表 · 浏览器实测报告",
+  "summary": "按设计文档把卡片主视图改成「按实际服务模型分组的最近会话列表」后，用真实 Electron 窗口 + mock magpie 网关（tools/mock_models.py）+ CDP 驱动逐场景实测：8 个场景全部通过——3 模型分组与排序、四指标（时长/首字/tok·s/状态）、失败与进行中状态、缺失指标降级为破折号、改道计数、7 模型只显示 6 行并汇总、断线保留上一帧并标注、紧凑模式与空态。单元测试 200/200、界面回归 model-list 8/8、pointer-input 16/16、drag-bounds 7/7 同时全绿。",
+  "environment": [
+    { "k": "操作系统", "v": "Windows 10.0.19041（x64）" },
+    { "k": "Node", "v": "v24.21.0" },
+    { "k": "Electron", "v": "39.8.10" },
+    { "k": "应用运行方式", "v": "node node_modules/electron/cli.js . --preview --remote-debugging-port=9223 --disable-gpu --no-sandbox" },
+    { "k": "网关数据", "v": "python tools/mock_models.py 3500 <scenario>（BUSY_MAGPIE_GATEWAY=http://127.0.0.1:3500）" },
+    { "k": "驱动与截图", "v": "node tools/cdp.mjs eval / shot（CDP_SCALE=2 双倍截图）" },
+    { "k": "说明", "v": "本机会话无 GPU 上下文，Electron 需 --disable-gpu 才能启动；因此截图不含 Windows 原生模糊（离屏截图本就不反映原生模糊）。" }
+  ],
+  "scenarios": [
+    {
+      "id": "S1",
+      "title": "ok 场景：一个模型一行，四项指标完整",
+      "steps": [
+        "python tools/mock_models.py 3500 ok",
+        "$env:BUSY_MAGPIE_GATEWAY=http://127.0.0.1:3500",
+        "node node_modules/electron/cli.js . --preview --remote-debugging-port=9223 --disable-gpu --no-sandbox",
+        "node tools/cdp.mjs eval \"JSON.stringify([...document.querySelectorAll('.model-row')].map(n=>({m:n.dataset.model,ms:n.querySelector('.col-ms').textContent,ttft:n.querySelector('.col-ttft').textContent,sp:n.querySelector('.col-speed').textContent})))\"",
+        "CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots/S1-ok.png"
+      ],
+      "expected": "3 行；顺序 glm-5.3 → claude-sonnet-4-5 → deepseek-v4.1-flash；三行均 100 tok/s、时长 3.0 秒/4.2 秒/2.5 秒、首字 600ms/800ms/500ms；无汇总行（4 条 route 中两条 glm-5.3 由不同 provider 服务，合并为一行）。",
+      "actual": "3 行，顺序与预期一致；glm-5.3：3.0 秒 / 600ms / 100 tok/s；claude-sonnet-4-5：4.2 秒 / 800ms / 100 tok/s；deepseek-v4.1-flash：2.5 秒 / 500ms / 100 tok/s；#modelHidden 隐藏。分组确实只按模型名——两条 glm-5.3 来自不同 provider 仍是一行。",
+      "status": "pass",
+      "shot": "S1-ok.png",
+      "evidence": "rows=[{\"m\":\"glm-5.3\",\"s\":\"ok\",\"ms\":\"3.0 秒\",\"ttft\":\"600ms\",\"sp\":\"100 tok/s\"},{\"m\":\"claude-sonnet-4-5\",...\"4.2 秒\",\"800ms\",\"100 tok/s\"},{\"m\":\"deepseek-v4.1-flash\",...\"2.5 秒\",\"500ms\",\"100 tok/s\"}] summary={\"hidden\":true}"
+    },
+    {
+      "id": "S2",
+      "title": "error 场景：失败行显示错误，改道行显示改道次数",
+      "steps": [
+        "python tools/mock_models.py 3500 error",
+        "等待应用自动重连并渲染（约 5s）",
+        "node tools/cdp.mjs eval \"...map(n=>({m:n.dataset.model,s:n.dataset.status,w:n.querySelector('.state-word').textContent,r:n.querySelector('.row-reroute')?.textContent}))\"",
+        "CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots/S2-error.png"
+      ],
+      "expected": "3 行；glm-5.3 为 error / 「错误」（红点）；deepseek-v4.1-flash 行尾小字「改道 1 次」但仍为完成；claude-sonnet-4-5 普通成功。",
+      "actual": "3 行；glm-5.3 → status=error、状态词「错误」、时长 1.8 秒、tok/s 显示 —；deepseek-v4.1-flash → 完成 + 「改道 1 次」；claude-sonnet-4-5 → 完成 100 tok/s。",
+      "status": "pass",
+      "shot": "S2-error.png",
+      "evidence": "rows=[{\"m\":\"glm-5.3\",\"s\":\"error\",\"w\":\"错误\",\"ms\":\"1.8 秒\",\"sp\":\"—\"},{\"m\":\"deepseek-v4.1-flash\",\"s\":\"ok\",\"r\":\"改道 1 次\"},{\"m\":\"claude-sonnet-4-5\",\"s\":\"ok\",\"w\":\"完成\"}]"
+    },
+    {
+      "id": "S3",
+      "title": "live 场景：进行中的请求不编造时长与速度",
+      "steps": [
+        "python tools/mock_models.py 3500 live",
+        "等待渲染后用 CDP 读取首行（最新）的四项指标",
+        "CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots/S3-live.png"
+      ],
+      "expected": "最新 glm-5.3 行为 live / 「进行中」（蓝点）；时长 —、首字 900ms、tok/s —；其余旧行保持完成态。",
+      "actual": "glm-5.3 → status=live、状态词「进行中」、时长 —、首字 900ms、tok/s —；deepseek 与 claude 两行仍为完成 100 tok/s。",
+      "status": "pass",
+      "shot": "S3-live.png",
+      "evidence": "rows[0]={\"m\":\"glm-5.3\",\"s\":\"live\",\"w\":\"进行中\",\"ms\":\"—\",\"ttft\":\"900ms\",\"sp\":\"—\"}"
+    },
+    {
+      "id": "S4",
+      "title": "missing 场景：缺失指标显示破折号而不是零",
+      "steps": [
+        "python tools/mock_models.py 3500 missing",
+        "CDP 读取最新行三列文本",
+        "node tools/cdp.mjs eval \"document.querySelector('.model-rows').textContent\" 检查是否出现 0ms / 0 tok/s",
+        "CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots/S4-missing.png"
+      ],
+      "expected": "最新 glm-5.3 行：时长 4.2 秒显示、首字 —、tok/s —；整页不出现 0ms / 0 毫秒 / 0 tok/s。",
+      "actual": "glm-5.3 → 4.2 秒 / — / —；deepseek 与 claude 两行数据完整（2.5 秒 500ms 100 tok/s、4.2 秒 800ms 100 tok/s）；页面文本无 0ms / 0 tok/s。",
+      "status": "pass",
+      "shot": "S4-missing.png",
+      "evidence": "rows[0]={\"m\":\"glm-5.3\",\"s\":\"ok\",\"ms\":\"4.2 秒\",\"ttft\":\"—\",\"sp\":\"—\"}"
+    },
+    {
+      "id": "S5",
+      "title": "many 场景：超过 6 个模型时只显示 6 行并汇总",
+      "steps": [
+        "python tools/mock_models.py 3500 many",
+        "CDP 读取 .model-row 数量、#modelHidden 的 hidden 与文本",
+        "CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots/S5-many.png"
+      ],
+      "expected": "6 行；#modelHidden 可见且文本为「+1 个模型」（7 个模型，隐藏 1 个）。",
+      "actual": "6 行：glm-5.3、deepseek-v4.1-flash、claude-sonnet-4-5、qwen3-coder、gpt-6-astra、kimi-k2.5；#modelHidden hidden=false、文本「+1 个模型」。",
+      "status": "pass",
+      "shot": "S5-many.png",
+      "evidence": "rows=6 summary={\"hidden\":false,\"text\":\"+1 个模型\"}"
+    },
+    {
+      "id": "S6",
+      "title": "flaky 场景：网关断线后保留上一帧并标注暂未刷新",
+      "steps": [
+        "python tools/mock_models.py 3500 flaky（前 2 次 trace 正常，之后 HTTP 500）",
+        "等待约 9s 让重连退避与失败生效",
+        "CDP 读取 body.className、#liveState、行数",
+        "CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots/S6-flaky.png"
+      ],
+      "expected": "断线后不闪空：仍保留此前 3 行；body 带 stale 类；右上角显示「重连中」。",
+      "actual": "body.className=\"stale\"、#liveState「重连中」、行数仍为 3（内容为断线前快照）。",
+      "status": "pass",
+      "shot": "S6-flaky.png",
+      "evidence": "state={\"cls\":\"stale\",\"live\":\"重连中\",\"rows\":3}"
+    },
+    {
+      "id": "S7",
+      "title": "紧凑模式：状态条取代列表并可恢复",
+      "steps": [
+        "确保 ok 场景已有数据",
+        "CDP 调用 window.busy.toggleCompact()（走真实主进程 IPC）",
+        "CDP 读取 body.compact、.stage-area 与 #compactView 的 display、#compactStatus 文本、window 尺寸",
+        "CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots/S7-compact.png",
+        "再次 toggleCompact() 恢复完整视图"
+      ],
+      "expected": "紧凑时 body.compact=true、列表容器隐藏（stage-area display:none）、状态条 display:flex、窗口 360×112、状态条显示连接状态与活动请求数；恢复后回到完整列表。",
+      "actual": "切换后 body.compact=true、stage-area=none、compactView=flex、窗口 360×112、状态条「已连接 · 空闲」；再次切换后恢复完整视图。",
+      "status": "pass",
+      "shot": "S7-compact.png",
+      "evidence": "before={\"rows\":3,\"compact\":false} after={\"compact\":true,\"stage\":\"none\",\"view\":\"flex\",\"status\":\"已连接 · 空闲\",\"size\":\"360x112\"}"
+    },
+    {
+      "id": "S8",
+      "title": "空态：网关刚启动、还没有任何请求",
+      "steps": [
+        "python tools/mock_models.py 3500 empty（trace.routes=[]）",
+        "等待应用连上并渲染空快照（约 7s）",
+        "CDP 读取行数、#modelEmpty 的 hidden 与文本、#liveState",
+        "CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots/S8-empty.png"
+      ],
+      "expected": "0 行；显示「等待 magpie 数据」；右上角仍为「实时」（网关可读，只是没有请求）；无汇总行。",
+      "actual": "rows=0；#modelEmpty hidden=false 且文本「等待 magpie 数据」；#liveState「实时」；#modelHidden 隐藏。",
+      "status": "pass",
+      "shot": "S8-empty.png",
+      "evidence": "rows=0 state={\"hidden\":false,\"text\":\"等待 magpie 数据\",\"live\":\"实时\",\"summaryHidden\":true}"
+    }
+  ],
+  "rawEvidence": [
+    {
+      "title": "单元测试 npm test（node --test，200 项）",
+      "text": "ℹ tests 200\nℹ pass 200\nℹ fail 0\nℹ duration_ms ~21000\n\n包含 tests/model-sessions.test.mjs（11 项：分组键优先级、同模型取最新、改道归属与计数、无 served 跳过、零值降级为 null、error/live/ok 三态、6 行上限与 hiddenCount、行字段）与 tests/timing.test.mjs（5 项：速度口径、整段返回/流式中为 null、缺值不兜底）。"
+    },
+    {
+      "title": "界面回归 tests/ui/model-list.cjs（真实 Electron，8 项）",
+      "text": "exit=0 PASS=8 FAIL=0\nPASS one row per served model reports duration, first byte, pace and status\nPASS missing measurements read as a dash, not as zero\nPASS a failed request reads 错误 and a running one reads 进行中\nPASS a rerouted request shows how many models it moved through\nPASS seven models render six rows plus a +N summary\nPASS a dropped gateway keeps the last frame and marks it stale\nPASS the card keeps blocking clicks and reporting its hit areas\nPASS a resized window keeps rows inside the card and compact mode hides the list"
+    },
+    {
+      "title": "保留的界面回归",
+      "text": "tests/ui/pointer-input.cjs      exit=0 PASS=16 FAIL=0（面板、设置、关于、紧凑、拖动/缩放结束后仍阻挡点击）\ntests/ui/drag-bounds.cjs --scale=1 exit=0 PASS=7 FAIL=0（拖动不累积尺寸误差、恢复屏幕后仍正确）\ntests/ui/glass-composition.cjs  exit=0 PASS=5 FAIL=0（透明度与圆角在点击穿透/交互/缩放后保持）"
+    },
+    {
+      "title": "环境受限、与本次改动无关的 4 项（在改动前基线 e486746 上同样失败）",
+      "text": "tests/ui/material.cjs           失败：'none' !== 'blur'（本机 Windows 10.0.19041 < 22621，材质按设计为 none）\ntests/ui/native-blur.cjs        失败：同一 OS 版本原因（测试自身要求 Windows 11 22H2+）\ntests/ui/resize-handles.cjs     失败：GetWindowRgn 返回空区域——本会话无 GPU 上下文，窗口原生区域不可用\ntests/ui/pointer-input.cjs --native 失败：opacity 0 时 Windows 把点击路由到后窗——同上，无合成器时原生命中测试不可用\n\n验证方法：git worktree add --detach <tmp> e486746 后在基线代码上运行同样命令，四者失败结果一致，基线 pointer-input 亦为 16 PASS。"
+    },
+    {
+      "title": "ruflo 任务记录（10 条，T1–T10）",
+      "text": "task-1793418560738-4rldv0 implementation T1 提取 web/timing.mjs 与 web/redact.mjs，presenter/app 改引用，测试改名\ntask-1793418561044-84hf5q implementation T2 新增 web/model-sessions.mjs（按 served model 分组的最新会话行）+ tests/model-sessions.test.mjs\ntask-1793418561349-8xbv3e implementation T3 web/index.html 与 web/styles.css 换成模型列表骨架\ntask-1793418561649-yezvca implementation T4 web/app.js 接入 renderModelList（四指标+状态+悬停+空态/断线）\ntask-1793418561977-1nznxd implementation T5 删除路由舞台/飞行动画代码与 4 个模块、5 个单测、5 个 UI 回归，改 CI\ntask-1793418562270-j8178h testing        T6 新增 tests/ui/model-list.cjs，改写 account-metrics/layout-motion\ntask-1793418562547-gxrp91 documentation T7 README 改写 + 版本 1.5.0 + 截图重拍\ntask-1793418562822-234gdl documentation T8 测试用例文档 docs/test-cases/\ntask-1793418574397-89ju97 review         T9 浏览器(Electron CDP)实测 + 含截图与步骤的 HTML 测试报告\ntask-1793418574718-23gqlt review         T10 全量 npm test + UI 回归 + ruflo 证据汇总 + git 提交\n\n过程记录：ruflo memory store -k busy-magpie/plan|busy-magpie/T1|busy-magpie/T2|busy-magpie/T3-T6（.claude-flow/，仅本地）。"
+    },
+    {
+      "title": "mock 数据的一处缺陷（本次实测发现并修复）",
+      "text": "tools/mock_models.py 原先给完成请求写 flow=1，而速度口径要求 flow*4 >= (ms-ttft)，导致所有行都显示 tok/s —。改为 flow = ms - ttft 后各场景稳定给出 100 tok/s（240 tokens / 2.4s）。这是 mock 的表示错误，不是 UI 逻辑问题——UI 对「整段返回」的请求正确地不编造速度。"
+    }
+  ]
+}

@@ -13,3 +13,9 @@ artifacts/
 .claude-flow/data/
 .claude-flow/logs/
 .claude-flow/sessions/
+
+# Local agent-tooling state (Ruflo / Claude Code / Mnemon runtime)
+.claude-flow/
+.claude/
+.swarm/
+.mnemon/
