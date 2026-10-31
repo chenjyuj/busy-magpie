@@ -48,9 +48,9 @@
 
 **Files:**
 - Create: `web/timing.mjs`, `web/redact.mjs`, `tests/timing.test.mjs`
-- Modify: `web/presenter.js`（内部 `speedInfo`/`timingInfo` 移出，改为 import）、`web/app.js:12-16` 的 import 段
+- Modify: `web/presenter.js`（内部 `speedInfo`/`timingInfo` 移出，改为 import）、`web/app.js:12-16` 的 import 段、`web/request-model.mjs`（只摘掉 `redactDiagnostic`，其余导出保留到 Task 5 随舞台代码一起删）、`tests/presenter.test.mjs`（data: URL 加载器无法解析相对导入，需先把 `timing.mjs` 内联进去）
 - Rename: `tests/request-model.test.mjs` → `tests/redact.test.mjs`
-- Delete: `web/request-model.mjs`
+- Delete: 无（`web/request-model.mjs` 的删除在 Task 5）
 
 **Interfaces:**
 - Produces: `timing.speedInfo(route, lastTry) -> {rate:Number, tokens:Number, window:Number} | null`；`timing.timingInfo(route, lastTry) -> {ms,ttft,queued,wait,own,speed} | null`；`redact.redactDiagnostic(value, limit=1800) -> String`
@@ -60,7 +60,8 @@
 - [ ] **Step 2: 跑失败** `node --test tests/timing.test.mjs` → FAIL（模块不存在）。
 - [ ] **Step 3: 搬迁实现**：把 `presenter.js` 的 `speedInfo`/`timingInfo`（约 180/205 行起）逐字移到 `web/timing.mjs` 并导出；`presenter.js` 改为 import；`redactDiagnostic` 逐字移到 `web/redact.mjs`，`app.js:926` 改 import 来源。
 - [ ] **Step 4: 跑通过** `node --test tests/timing.test.mjs` → PASS；`git mv tests/request-model.test.mjs tests/redact.test.mjs` 并改 import → `node --test tests/redact.test.mjs` PASS。
-- [ ] **Step 5: 提交** `git add web/timing.mjs web/redact.mjs web/presenter.js web/app.js tests/timing.test.mjs tests/redact.test.mjs && git rm web/request-model.mjs && git commit -m "refactor: extract timing and redact modules"`
+- [ ] **Step 4b: 修 presenter 测试加载器**：`tests/presenter.test.mjs` 以 data: URL 加载 `presenter.js`，相对导入不可解析；改为先读 `web/timing.mjs` 并把它作为 data: URL 内联进 `presenter.js` 源码后再加载。跑 `npm test` → 全绿。
+- [ ] **Step 5: 提交** `git add web/timing.mjs web/redact.mjs web/presenter.js web/app.js web/request-model.mjs tests/timing.test.mjs tests/redact.test.mjs tests/presenter.test.mjs && git commit -m "refactor: extract timing and redact modules"`
 
 ### Task 2: 分组模块 `web/model-sessions.mjs`（TDD）
 

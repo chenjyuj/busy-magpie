@@ -1,8 +1,15 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-const source=await readFile(new URL('../web/presenter.js',import.meta.url),'utf8');
-const {present}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+// presenter.js is loaded as a data: URL module, which cannot resolve a
+// relative specifier, so the timing module it imports is inlined first.
+const [timing,source]=await Promise.all([
+  readFile(new URL('../web/timing.mjs',import.meta.url),'utf8'),
+  readFile(new URL('../web/presenter.js',import.meta.url),'utf8'),
+]);
+const timingUrl='data:text/javascript;base64,'+Buffer.from(timing).toString('base64');
+const bundled=source.replace("from './timing.mjs'",`from '${timingUrl}'`);
+const {present}=await import('data:text/javascript;base64,'+Buffer.from(bundled).toString('base64'));
 const text=parts=>parts.map(p=>p.text).join('');
 
 test('a completed no-candidate failure is not described as waiting',()=>{

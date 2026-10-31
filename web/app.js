@@ -12,7 +12,8 @@ import { downloadSize } from './download-progress.mjs';
 import { FlightBook } from './flight-playback.mjs';
 import { wireCurve, hubCurve, glideProgress } from './flight-path.mjs';
 import { stagedRoutes, wireState, nextRestExpiry } from './routing-state.mjs';
-import { requestActive, requestGroupKey, redactDiagnostic, groupRequests } from './request-model.mjs';
+import { requestActive, requestGroupKey, groupRequests } from './request-model.mjs';
+import { redactDiagnostic } from './redact.mjs';
 import { projectRequestModes } from './request-modes.mjs';
 
 const $ = (id) => document.getElementById(id);
