@@ -125,7 +125,7 @@ from urllib.parse import parse_qs, urlparse
 # Route times hang off this instant, so every run of a scenario is identical.
 BASE = datetime.now().astimezone()
 
-SCENARIOS = ("ok", "error", "live", "missing", "many", "flaky", "empty")
+SCENARIOS = ("ok", "error", "live", "missing", "many", "one", "quota", "flaky", "empty")
 
 USAGE_PERIODS = ("today", "7d", "30d", "all")
 
@@ -146,6 +146,18 @@ PROVIDER_NAMES = {
     "openai": "OpenAI",
     "moonshot": "Moonshot",
     "google": "Google",
+    "codearts": "CodeArts",
+    "trae-cn": "Trae CN",
+}
+
+# Fixed allowance per provider so a screenshot can be re-checked: officeace
+# leaves 89% (green), codearts 40% (amber), trae-cn 15% (red). Providers not
+# listed report no allowance at all, which the card draws as no bar.
+QUOTAS = {
+    "officeace": {"used": 11, "amount": 5_755, "limit": 9_600, "unit": "credits"},
+    "workbuddy": {"used": 0, "amount": 331, "limit": 3_400, "unit": "credits"},
+    "codearts": {"used": 60, "amount": 5_760, "limit": 9_600, "unit": "credits"},
+    "trae-cn": {"used": 85, "amount": 5_015, "limit": 5_900, "unit": "credits"},
 }
 
 SCENARIO_NOTES = {
@@ -154,6 +166,8 @@ SCENARIO_NOTES = {
     "live": "3 rows: newest is done=false (no ms/out) -> 进行中 + 首字 900ms",
     "missing": "3 rows: newest has ms but no ttft/out -> 时长 shown, 首字 —, tok/s —",
     "many": "7 served models -> 6 rows + 「+1 个模型」 summary row",
+    "one": "one provider with one model: the smallest useful card",
+    "quota": "3 providers with 89% / 40% / 15% left -> green, amber and red allowance bars",
     "flaky": "ok at first, then HTTP 500 / dropped connection from the Nth trace request",
     "empty": "a live gateway that has answered nothing yet: no routes -> 等待 magpie 数据",
 }
@@ -209,6 +223,17 @@ def attempt(provider: str, who: str, model: str, *, done: bool = True,
         "model": model,
         "provider": provider,
     }
+    quota = QUOTAS.get(provider)
+    if quota:
+        order_item.update({
+            "known": True,
+            "used": quota["used"],
+            "amount": quota["amount"],
+            "limit": quota["limit"],
+            "unit": quota["unit"],
+            "renews": ["2026-11-19T16:00:00Z"],
+            "usedRenews": "2026-11-19T16:00:00Z",
+        })
     return try_item, order_item
 
 
@@ -298,13 +323,20 @@ def scenario_error() -> list[dict]:
 
 
 def scenario_live() -> list[dict]:
-    """The newest route is still streaming: no ms, no out, alive forever."""
+    """The newest route is still streaming: no ms, no out, alive forever.
+
+    An earlier completed request for the same model proves the card keeps its
+    measurements while the new one runs.
+    """
     live = attempt("officeace", "alex@example.com", "glm-5.3", done=False, status=None, ms=None, ttft=900)
     return [
         make_route(1792464002201, 15, agent="codex", requested="officeace/deepseek-v4.1-flash",
                    served="glm-5.3", provider="officeace", who="alex@example.com",
                    conv="01a1546e-3108-7491", attempts=[live], done=False, status=None,
                    ms=None, ttft=900),
+        make_route(1792464002204, 45, agent="codex", requested="officeace/deepseek-v4.1-flash",
+                   served="glm-5.3", provider="officeace", who="alex@example.com",
+                   conv="01a1546e-3108-7494", ms=3000, ttft=600, out=240),
         make_route(1792464002202, 40, agent="codex", requested="officeace/deepseek-v4.1-flash",
                    served="deepseek-v4.1-flash", provider="officeace", who="alex@example.com",
                    conv="01a1546e-3108-7492", ms=2500, ttft=500, out=200),
@@ -351,6 +383,30 @@ def scenario_many() -> list[dict]:
     return routes
 
 
+def scenario_one() -> list[dict]:
+    """A single provider with a single model: the smallest useful card."""
+    return [
+        make_route(1792464002101, 20, agent="codex", requested="officeace/glm-5.3",
+                   served="glm-5.3", provider="officeace", who="alex@example.com",
+                   conv="01a1546e-3108-74a1", ms=3000, ttft=600, out=240),
+    ]
+
+
+def scenario_quota() -> list[dict]:
+    """Three providers leaving 89% (green), 40% (amber) and 15% (red)."""
+    return [
+        make_route(1792464002701, 10, agent="codex", requested="officeace/glm-5.3",
+                   served="glm-5.3", provider="officeace", who="alex@example.com",
+                   conv="01a1546e-3108-77a1", ms=3000, ttft=600, out=240),
+        make_route(1792464002702, 40, agent="dsh", requested="codearts/glm-5.3",
+                   served="glm-5.3", provider="codearts", who="hid8c21@example.com",
+                   conv="01a1546e-3108-77a2", ms=2500, ttft=520, out=200),
+        make_route(1792464002703, 70, agent="claude", requested="trae-cn/deepseek-v4.1-flash",
+                   served="deepseek-v4.1-flash", provider="trae-cn", who="t97226@example.com",
+                   conv="01a1546e-3108-77a3", ms=3800, ttft=760, out=304),
+    ]
+
+
 def scenario_flaky() -> list[dict]:
     """Same data as ``ok``; the transport breaks after the first answers."""
     return scenario_ok()
@@ -367,6 +423,8 @@ BUILDERS = {
     "live": scenario_live,
     "missing": scenario_missing,
     "many": scenario_many,
+    "one": scenario_one,
+    "quota": scenario_quota,
     "flaky": scenario_flaky,
     "empty": scenario_empty,
 }

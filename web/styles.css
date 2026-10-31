@@ -3285,6 +3285,10 @@ body.native-material .card {
 }
 
 /* The list itself. */
+.content {
+  grid-template-rows: 30px 10px 1fr 6px 16px;
+}
+
 .model-list {
   grid-row: 3;
   display: flex;
