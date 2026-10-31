@@ -303,7 +303,11 @@ function reportHitAreas() {
   };
   const controls = [el.tokenPill, el.appVersion, $('updateChip'), $('quickMenuToggle'), $('compactPill'), $('compactExpand'), $('compactMenu')]
     .filter((node) => node && !node.hidden && node.isConnected)
-    .map(rectangle);
+    .map(rectangle)
+    // A model row is a button too: main needs its rectangle to treat the
+    // pointer as being over a control, which is also what lets the window take
+    // focus so the keyboard can open a row.
+    .concat([...el.providerGroups.querySelectorAll('.model-row')].map(rectangle));
   const payload = {
     controls,
     resize: [...document.querySelectorAll('.resize-handle')].map(rectangle),
@@ -1042,7 +1046,7 @@ function providerGroupNode(group) {
   head.append(create('b', '', group.provider));
   if (group.quota) head.append(quotaBarNode(group.quota));
   node.append(head);
-  for (const row of group.models) node.append(modelRowNode(row));
+  for (const row of group.models) node.append(modelRowNode(row, group));
   return node;
 }
 
@@ -1058,10 +1062,22 @@ function rowTip(row) {
   return bits.join(' · ');
 }
 
-function modelRowNode(row) {
+function modelRowNode(row, group) {
   const node = create('div', `model-row ${row.status}`);
   node.dataset.model = row.model;
   node.dataset.status = row.status;
+  // The row is the way into the request detail list: a real button, so both
+  // the mouse and the keyboard can ask for it.
+  node.tabIndex = 0;
+  node.setAttribute('role', 'button');
+  node.setAttribute('aria-label', `查看 ${group.provider} 的 ${row.model} 请求明细`);
+  const open = () => window.busy.openDetail?.({
+    providerKey: group.key, model: row.model, providerName: group.provider,
+  });
+  node.addEventListener('click', open);
+  node.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }
+  });
 
   const name = create('span', 'col-model');
   name.append(create('i', `status-dot ${row.status === 'error' ? 'bad' : row.status === 'live' ? 'accent' : 'good'}`));
@@ -1092,6 +1108,8 @@ function renderProviderGroups(groups, hiddenCount) {
   el.modelEmpty.hidden = rowsShown > 0;
   el.modelHidden.hidden = hiddenCount <= 0;
   el.modelHidden.textContent = hiddenCount > 0 ? `+${hiddenCount} 个模型` : '';
+  // The rows just changed, so their control rectangles did too.
+  requestAnimationFrame(reportHitAreas);
 }
 
 function render() {

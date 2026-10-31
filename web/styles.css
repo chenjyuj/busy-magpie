@@ -3367,7 +3367,22 @@ body.native-material .card {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   color: #3a3a3c;
   font-size: 12px;
+  /* A row opens that model's request detail, so it reads as a button. */
+  cursor: pointer;
+  transition: box-shadow 0.12s ease, transform 0.12s ease;
 }
+
+.model-row:hover {
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
+  transform: translateY(-1px);
+}
+
+.model-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+body.noanim .model-row { transition: none; }
 
 .col-model {
   display: flex;

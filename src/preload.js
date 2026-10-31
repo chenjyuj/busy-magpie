@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('busy', {
   resizeEnd: () => ipcRenderer.send('busy:resize-end'),
   setUsagePeriod: (period) => ipcRenderer.invoke('usage:set-period', period),
   setHitAreas: (areas) => ipcRenderer.send('busy:hit-areas', areas),
+  openDetail: (query) => ipcRenderer.send('detail:open', query),
   toggleMenu: () => ipcRenderer.send('busy:menu-toggle'),
   closeMenu: () => ipcRenderer.send('busy:menu-close'),
   toggleCompact: () => ipcRenderer.send('busy:compact-toggle'),
