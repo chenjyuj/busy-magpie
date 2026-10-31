@@ -1,7 +1,9 @@
 import {
   formatDuration,
+  formatLatency,
   formatTokens,
   mask,
+  STATE_WORDS,
 } from './presenter.js';
 import { brandKey, brandMark } from './brand-icons.mjs';
 import { downloadSize } from './download-progress.mjs';
@@ -186,11 +188,6 @@ function renderUsageStatus() {
 let tokenText = '';
 const TOKEN_DIGIT_H = 21;
 
-function formatLatency(ms) {
-  const value = Number(ms) || 0;
-  if (!value) return '—';
-  return value < 1000 ? `${Math.round(value)}ms` : `${(value / 1000).toFixed(1)}s`;
-}
 function staticTokenTrack(char) {
   const track = document.createElement('span');
   track.className = 'token-track';
@@ -990,7 +987,6 @@ function applyGateway() {
 // numbers of the last request that finished.
 
 const ROW_LIMIT = 6;
-const STATE_WORDS = { error: '错误', live: '进行中', ok: '完成' };
 let rowsShown = 0;
 
 const routeActive = route => Boolean(route) && (!route.done || (route.tries || []).some(item => !item.done));

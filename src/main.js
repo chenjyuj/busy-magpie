@@ -16,6 +16,7 @@ const { heartbeat } = require('./launch-policy.cjs');
 const { parseGateway, gatewayProblem } = require('./gateway-config.cjs');
 const { fitWindowBounds } = require('./window-bounds.cjs');
 const { windowMaterial } = require('./window-material.cjs');
+const { placeDetail } = require('./detail-placement.cjs');
 const MATERIAL = windowMaterial();
 
 const IS_PREVIEW = process.argv.includes('--preview');
@@ -26,6 +27,8 @@ if (IS_PREVIEW) {
 
 const WIDTH = 632;
 const HEIGHT = 432;
+const DETAIL_WIDTH = 420;
+const DETAIL_HEIGHT = 520;
 const COMPACT_WIDTH = 360;
 const COMPACT_HEIGHT = 112;
 // The card is drawn on a 600×400 canvas inside 16px of padding. Keeping the
@@ -437,6 +440,9 @@ function createWindow() {
     if (lastTrace) win.webContents.send('magpie:trace', lastTrace);
     win.webContents.send('magpie:connection', connection);
     win.webContents.send('magpie:layout', layoutMode);
+    // A detail window that was already open when the card reloaded still needs
+    // its copy of the table.
+    pushDetail();
     if (settingsOpen) {
       win.webContents.send('magpie:settings-panel', { open: true, mode: currentPanelMode });
     }
@@ -751,9 +757,100 @@ function savePosition() {
   saveSettings();
 }
 
+// ── the request detail window ───────────────────────────────────────────────
+// A second, plain window: it opens beside the card for one (provider, model)
+// and lists every request that pair served. It never has to let clicks
+// through, so it resizes natively instead of using the card's hand-rolled hit
+// areas, and it holds no gateway connection of its own — main pushes the
+// merged route table it already keeps.
+let detailWin = null;
+let detailQuery = null;
+
+function createDetailWindow() {
+  detailWin = new BrowserWindow({
+    width: DETAIL_WIDTH,
+    height: DETAIL_HEIGHT,
+    minWidth: 360,
+    minHeight: 300,
+    frame: false,
+    resizable: true,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    show: false,
+    skipTaskbar: true,
+    parent: win && !win.isDestroyed() ? win : undefined,
+    alwaysOnTop: settings.topmost,
+    backgroundColor: '#00000000',
+    ...MATERIAL.options,
+    title: 'Busy Magpie · 请求明细',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      spellcheck: false,
+      backgroundThrottling: false,
+    },
+  });
+  detailWin.setMenuBarVisibility(false);
+  detailWin.loadFile(path.join(__dirname, '..', 'web', 'detail.html'));
+  detailWin.once('ready-to-show', () => {
+    positionDetailWindow();
+    detailWin.showInactive();
+    pushDetail();
+  });
+  detailWin.on('closed', () => { detailWin = null; detailQuery = null; });
+}
+
+// Beside the card, on whichever screen the card is on.
+function positionDetailWindow() {
+  if (!detailWin || detailWin.isDestroyed() || !win || win.isDestroyed()) return;
+  const bounds = win.getBounds();
+  const work = screen.getDisplayMatching(bounds).workArea;
+  const size = detailWin.getBounds();
+  const spot = placeDetail(size, bounds, work);
+  detailWin.setBounds({ x: spot.x, y: spot.y, width: size.width, height: size.height }, false);
+}
+
+function pushDetail(force = false) {
+  if (!detailWin || detailWin.isDestroyed() || !detailQuery) return;
+  // Pushes that ride along with a trace are skipped while the page is still
+  // loading; the page's own ready call asks again and bypasses that guard.
+  if (!force && detailWin.webContents.isLoading()) return;
+  detailWin.webContents.send('magpie:detail', {
+    query: detailQuery,
+    routes: Array.isArray(lastTrace?.routes) ? lastTrace.routes : [],
+  });
+}
+
+function openDetail(query) {
+  const providerKey = String(query?.providerKey || '').trim().toLowerCase();
+  const model = String(query?.model || '').trim();
+  if (!providerKey || !model) return;
+  detailQuery = { providerKey, model, providerName: String(query?.providerName || '').trim() };
+  if (!detailWin || detailWin.isDestroyed()) {
+    createDetailWindow();
+    return;
+  }
+  // Already open: reuse it, so clicking another model swaps the list instead of
+  // stacking windows.
+  positionDetailWindow();
+  pushDetail();
+}
+
+function closeDetail() {
+  if (detailWin && !detailWin.isDestroyed()) detailWin.close();
+  detailWin = null;
+  detailQuery = null;
+}
+
 function applyTopmost() {
   if (!win || win.isDestroyed()) return;
   win.setAlwaysOnTop(settings.topmost, IS_MAC ? 'floating' : 'normal');
+  if (detailWin && !detailWin.isDestroyed()) {
+    detailWin.setAlwaysOnTop(settings.topmost, IS_MAC ? 'floating' : 'normal');
+  }
 }
 
 function applyPointerInput() {
@@ -1413,6 +1510,8 @@ class TraceClient {
         fitWindow();
         send('magpie:trace', snapshot);
         send('magpie:connection', connection);
+        // The detail window answers to the same merged table the card uses.
+        pushDetail();
       } catch (error) {
         if (this.stopped) break;
         const detail = describeError(error);
@@ -1832,6 +1931,12 @@ ipcMain.on('settings:open-file', () => {
 ipcMain.on('settings:close', () => closeSettingsPanel());
 ipcMain.handle('gateway:test', (_event, raw) => testGateway(raw));
 ipcMain.handle('window:reset', () => resetPlacement());
+
+// The card asks for one (provider, model); the detail window asks for its copy
+// of the table once it has loaded, which is what avoids racing its first paint.
+ipcMain.on('detail:open', (_event, query) => openDetail(query));
+ipcMain.on('detail:close', () => closeDetail());
+ipcMain.on('detail:ready', () => pushDetail(true));
 
 ipcMain.on('busy:ready', () => {
   rendererReady = true;

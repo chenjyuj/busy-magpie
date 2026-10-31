@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('busy', {
   setUsagePeriod: (period) => ipcRenderer.invoke('usage:set-period', period),
   setHitAreas: (areas) => ipcRenderer.send('busy:hit-areas', areas),
   openDetail: (query) => ipcRenderer.send('detail:open', query),
+  closeDetail: () => ipcRenderer.send('detail:close'),
+  detailReady: () => ipcRenderer.send('detail:ready'),
   toggleMenu: () => ipcRenderer.send('busy:menu-toggle'),
   closeMenu: () => ipcRenderer.send('busy:menu-close'),
   toggleCompact: () => ipcRenderer.send('busy:compact-toggle'),
@@ -53,6 +55,9 @@ contextBridge.exposeInMainWorld('busy', {
   updateOpenRelease: () => ipcRenderer.send('updates:open-release'),
   onTrace: (callback) => {
     ipcRenderer.on('magpie:trace', (_event, data) => callback(data));
+  },
+  onDetail: (callback) => {
+    ipcRenderer.on('magpie:detail', (_event, data) => callback(data));
   },
   onConnection: (callback) => {
     ipcRenderer.on('magpie:connection', (_event, data) => callback(data));

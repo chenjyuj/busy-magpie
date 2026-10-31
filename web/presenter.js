@@ -50,6 +50,15 @@ export function formatDuration(ms) {
   return rest === 0 ? `${minutes} 分` : `${minutes} 分 ${rest} 秒`;
 }
 
+// A first-byte reading, printed the way the card's row already printed it:
+// milliseconds below a second, seconds above it, a dash when magpie reported
+// nothing at all.
+export function formatLatency(ms) {
+  const value = Number(ms) || 0;
+  if (!value) return '—';
+  return value < 1000 ? `${Math.round(value)}ms` : `${(value / 1000).toFixed(1)}s`;
+}
+
 export function formatTokens(value) {
   const n = Number(value) || 0;
   if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
@@ -65,3 +74,8 @@ function titleCase(value) {
     .trim()
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
+
+// What a finished, a running and a failed request are called on screen. The
+// card's rows and the detail window's rows both read the words from here so
+// they can never disagree.
+export const STATE_WORDS = { error: '错误', live: '进行中', ok: '完成' };

@@ -3466,3 +3466,133 @@ body.stale .live-word::after {
 /* Small chrome bits that were tuned for the dark card. */
 .drag-grip i { background: #b0b0b8; }
 .brand-sep { background: rgba(0, 0, 0, 0.11); }
+
+/* ── the request detail window ───────────────────────────────────────────────
+   A light sheet that sits beside the card and reads the same way: one row per
+   request, newest first. The window is an ordinary one, so it resizes natively
+   and needs none of the card's hit-area machinery. */
+.detail-body {
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
+}
+
+.detail-card {
+  display: grid;
+  grid-template-rows: 34px 22px minmax(0, 1fr) auto;
+  height: calc(100vh - 24px);
+  margin: 12px;
+  padding: 0 14px 6px;
+  border-radius: 16px;
+  background: #f5f5f7;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  -webkit-app-region: drag;
+}
+
+.detail-title {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail-x {
+  -webkit-app-region: no-drag;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.detail-x:hover { background: rgba(0, 0, 0, 0.06); color: var(--ink); }
+.detail-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.detail-columns,
+.detail-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 54px;
+  gap: 8px;
+  align-items: center;
+}
+
+.detail-columns {
+  color: var(--faint);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.detail-columns span:nth-child(n + 2) { text-align: right; }
+.detail-columns span:last-child { text-align: left; }
+
+.detail-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 0;
+  scrollbar-width: thin;
+}
+
+.detail-row {
+  flex: 0 0 auto;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.detail-row .col-clock { color: var(--faint); }
+.detail-row .col-ms,
+.detail-row .col-ttft,
+.detail-row .col-speed { text-align: right; color: var(--ink); }
+.detail-row.error .col-speed { color: var(--faint); }
+.detail-row .col-state { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.detail-row .state-word { color: var(--faint); }
+.detail-row.ok .state-word { color: #34c759; }
+.detail-row.live .state-word { color: #007aff; }
+.detail-row.error .state-word { color: #ff3b30; }
+
+.detail-empty {
+  margin: 12px 0 0;
+  color: var(--faint);
+  font-size: 12px;
+  text-align: center;
+}
+
+.detail-foot {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 2px;
+}
+
+.detail-more {
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+
+.detail-more:hover { color: var(--ink); border-color: rgba(0, 0, 0, 0.2); }
+.detail-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

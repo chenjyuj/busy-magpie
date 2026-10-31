@@ -37,14 +37,28 @@ async function detailJs(code) {
   return win ? win.webContents.executeJavaScript(code) : null;
 }
 
+// The gateway the app actually polls: whatever `feed()` last parked here is
+// what main merges into the table it pushes on to both windows.
+let servedRoutes = [];
+let traceSeq = 0;
 const server = http.createServer((req, res) => {
-  const data = req.url.includes('/usage')
-    ? { period: '30d', calls: 3, input: 14120, output: 1650, cache_read: 520 }
-    : { seq: 1, pid: 12345, totals: { requests: 3, rerouted: 0, errors: 0 }, routes: [] };
-  if (!res.destroyed) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); }
+  if (req.url.includes('/usage')) {
+    const usage = { period: '30d', calls: 3, input: 14120, output: 1650, cache_read: 520 };
+    if (!res.destroyed) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(usage)); }
+    return;
+  }
+  traceSeq += 1;
+  const body = { seq: traceSeq, pid: 12345, totals: { requests: servedRoutes.length, rerouted: 0, errors: 0 }, routes: servedRoutes };
+  // A short pause stands in for magpie's long poll, so the app is not spinning.
+  setTimeout(() => {
+    if (res.destroyed) return;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(body));
+  }, 120);
 });
 
 app.on('browser-window-created', (_event, created) => {
+  created.webContents.on('console-message', (_e, level, message) => { if (level >= 3) errors.push(message); });
   if (card) return;                       // the detail window stays untouched
   card = created;
   card.showInactive = () => { cardVisible = true; card.emit('show'); };
@@ -54,7 +68,6 @@ app.on('browser-window-created', (_event, created) => {
   card.blur = () => card.emit('blur');
   const ignore = card.setIgnoreMouseEvents.bind(card);
   card.setIgnoreMouseEvents = (value, options) => { ignored = value; ignore(value, options); };
-  card.webContents.on('console-message', (_e, level, message) => { if (level >= 3) errors.push(message); });
 });
 ipcMain.on('busy:hit-areas', (_event, data) => { hitAreas = data; });
 ipcMain.on('detail:open', (_event, query) => { opened = query; });
@@ -82,9 +95,12 @@ async function run() {
     card.webContents.send = (channel, ...args) => ['magpie:trace', 'magpie:connection', 'magpie:usage', 'magpie:usage-status'].includes(channel)
       ? undefined : push(channel, ...args);
     const feed = async list => {
+      servedRoutes = list;
+      // The card is fed directly so its own assertions stay deterministic;
+      // main's poll also carries the list to the detail window within a beat.
       push('magpie:trace', { pid: 12345, seq: 40, now: new Date().toISOString(), totals: { requests: list.length }, routes: list });
       push('magpie:connection', { online: true, detail: '127.0.0.1:3425' });
-      await sleep(200);
+      await sleep(700);
     };
 
     // ── T4: the card offers a way in ────────────────────────────────────────
@@ -108,6 +124,38 @@ async function run() {
     assert.ok(hitAreas.controls.some(box => box.x === rowBox.x && box.y === rowBox.y && box.width === rowBox.width),
       'the row is reported as a control so the window can take focus for it');
     record('the row is reported as a control, so keyboard focus can reach it');
+
+    // ── T5: the window and its page ─────────────────────────────────────────
+    await sleep(700);
+    assert.equal(BrowserWindow.getAllWindows().length, 2, 'the detail window opens beside the card');
+    assert.ok(detail(), 'the second window is the detail window');
+    assert.equal(await detailJs('document.getElementById("detailTitle").textContent'), 'OfficeAce · glm-5.3');
+    record('the detail window opens with a title naming provider and model');
+
+    const painted = await detailJs(`(()=>{const rows=[...document.querySelectorAll('.detail-row')];
+      return { count: rows.length, card: getComputedStyle(document.querySelector('.detail-card')).backgroundColor,
+        row: getComputedStyle(rows[0]).backgroundColor };})()`);
+    assert.equal(painted.count, 2, 'both requests of that model are listed');
+    assert.equal(painted.card, 'rgb(245, 245, 247)');
+    assert.equal(painted.row, 'rgb(255, 255, 255)');
+    record('one white row per request on the light sheet');
+
+    const first = await detailJs(`(()=>{const r=document.querySelector('.detail-row');
+      return { clock: r.querySelector('.col-clock').textContent, ms: r.querySelector('.col-ms').textContent,
+        ttft: r.querySelector('.col-ttft').textContent, speed: r.querySelector('.col-speed').textContent,
+        state: r.querySelector('.col-state').textContent };})()`);
+    assert.match(first.clock, /^\d{2}:\d{2}:\d{2}$/, `a clock reading, got ${first.clock}`);
+    assert.equal(first.ms, '3.0 秒');
+    assert.equal(first.ttft, '600ms');
+    assert.equal(first.speed, '100 tok/s');
+    assert.equal(first.state, '完成');
+    record('each row carries clock, duration, first byte, pace and state');
+    fs.writeFileSync(path.join(output, 'detail.png'), (await detail().webContents.capturePage()).toPNG());
+
+    await detailJs('window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))');
+    await sleep(500);
+    assert.equal(BrowserWindow.getAllWindows().length, 1, 'Escape closes the detail window');
+    record('Escape closes the detail window');
 
     assert.equal(errors.length, 0, errors.join('\n'));
     fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ ok: true, checks, rendererErrors: errors }, null, 2));

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self';" />
+  <meta name="color-scheme" content="light" />
+  <title>请求明细</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body class="detail-body">
+  <div class="detail-card">
+    <header class="detail-head">
+      <b class="detail-title" id="detailTitle">请求明细</b>
+      <button class="detail-x" id="detailClose" type="button" aria-label="关闭请求明细">×</button>
+    </header>
+
+    <div class="detail-columns" role="row">
+      <span role="columnheader">时间</span>
+      <span role="columnheader">时长</span>
+      <span role="columnheader">首字节</span>
+      <span role="columnheader">tok/s</span>
+      <span role="columnheader">状态</span>
+    </div>
+
+    <div class="detail-rows" id="detailRows" role="list"></div>
+    <p class="detail-empty" id="detailEmpty" hidden>这个模型还没有请求</p>
+
+    <footer class="detail-foot">
+      <button class="detail-more" id="detailMore" type="button" hidden>加载更多</button>
+    </footer>
+  </div>
+  <script type="module" src="./detail.js"></script>
+</body>
+</html>
