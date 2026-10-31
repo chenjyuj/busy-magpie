@@ -1,0 +1,109 @@
+{
+  "title": "busy-magpie v1.7.0 模型请求明细浮窗 · 浏览器实测报告",
+  "summary": "按设计文档实现「点击模型行 → 独立浮窗逐行列出该 provider 该模型的每一次请求（时间/时长/首字节/tok·s/状态）」后，用真实 Electron 双窗口 + mock magpie 网关实测 5 个场景：首屏 20 条、加载更多、实时置顶追加、进行中/错误/缺首字节三态、位置贴卡片（右侧无空间时翻左 12px）与 Esc 关闭——全部通过。同期单元测试 227/227、界面回归 detail-window 14/14、model-list 11/11、pointer-input 16/16、drag-bounds 7/7 全绿；glass-composition 因当前会话锁屏（LogonUI 在跑）在改动前后同样 0 PASS，属环境限制。",
+  "environment": [
+    { "k": "操作系统", "v": "Windows 10.0.19041（x64），当前桌面会话为锁屏状态（LogonUI 在运行）" },
+    { "k": "Node / Electron", "v": "Node v24.21.0 / Electron 39.8.10（preview 模式，独立 profile）" },
+    { "k": "启动命令", "v": "BUSY_MAGPIE_GATEWAY=http://127.0.0.1:3500 node node_modules/electron/cli.js . --preview --remote-debugging-port=9223 --disable-gpu --no-sandbox" },
+    { "k": "网关数据", "v": "python tools/mock_models.py 3500 detail —— officeace/glm-5.3 共 25 次请求：最新一次仍在流式、一条 500 错误、一条只有时长没有首字节，其余正常" },
+    { "k": "驱动与截图", "v": "node tools/cdp.mjs eval|shot，用 CDP_MATCH=index.html / detail.html 分别指向卡片与浮窗两个页面；CDP_SCALE=2 出双倍图" },
+    { "k": "实时追加的制造方式", "v": "GET /v1/magpie/grow?model=glm-5.3&provider=officeace（mock 的开发用端点，在表顶插入一条新请求，等价于 magpie 表里多了一条）" },
+    { "k": "说明", "v": "本机无 GPU，Electron 需 --disable-gpu；截图由页面自身渲染捕获（离屏），不依赖桌面是否解锁。" }
+  ],
+  "scenarios": [
+    {
+      "id": "D1",
+      "title": "点模型行 → 浮窗首屏 20 条",
+      "steps": [
+        "python tools/mock_models.py 3500 detail",
+        "BUSY_MAGPIE_GATEWAY=http://127.0.0.1:3500 node node_modules/electron/cli.js . --preview --remote-debugging-port=9223 --disable-gpu --no-sandbox",
+        "CDP_MATCH=index.html node tools/cdp.mjs eval \"[...document.querySelectorAll('.model-row')].find(r=>r.dataset.model==='glm-5.3').click()\"",
+        "CDP_MATCH=detail.html node tools/cdp.mjs eval \"({title:detailTitle.textContent, rows:document.querySelectorAll('.detail-row').length})\"",
+        "CDP_MATCH=detail.html CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots-detail/D1-first-page.png"
+      ],
+      "expected": "出现第二个窗口；标题为「OfficeAce · glm-5.3」；第一页 20 行；每行给出时间 HH:MM:SS、时长、首字节、tok/s、状态；最新的那条仍在流式，因此该行三项为 —、状态「进行中」；底部出现「加载更多」",
+      "actual": "两个页面（detail.html + index.html）；标题 OfficeAce · glm-5.3；rows=20；more=true；首行 {clock:'00:42:57', ms:'—', ttft:'—', speed:'—', state:'进行中'}",
+      "status": "pass",
+      "shot": "D1-first-page.png"
+    },
+    {
+      "id": "D2",
+      "title": "点「加载更多」→ 25 条，按钮消失",
+      "steps": [
+        "CDP_MATCH=detail.html node tools/cdp.mjs eval \"detailMore.click()\"",
+        "CDP_MATCH=detail.html node tools/cdp.mjs eval \"({rows:document.querySelectorAll('.detail-row').length, more:!detailMore.hidden})\"",
+        "CDP_MATCH=detail.html CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots-detail/D2-after-load-more.png"
+      ],
+      "expected": "再加载一页（20 条）后显示全部 25 条；没有更多时「加载更多」消失",
+      "actual": "rows=25；more=false",
+      "status": "pass",
+      "shot": "D2-after-load-more.png"
+    },
+    {
+      "id": "D3",
+      "title": "实时追加：新请求置顶，列表长一条",
+      "steps": [
+        "Invoke-RestMethod 'http://127.0.0.1:3500/v1/magpie/grow?model=glm-5.3&provider=officeace'",
+        "等待一次长轮询周期（约 4 秒）",
+        "CDP_MATCH=detail.html node tools/cdp.mjs eval \"({rows:..., top:{ms:首行时长, state:首行状态}})\"",
+        "CDP_MATCH=detail.html CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots-detail/D3-live-append.png"
+      ],
+      "expected": "浮窗不经重开、不点刷新就多出一行，且新请求在最上面（2.6 秒 / 完成）；已加载页数不变",
+      "actual": "rows=26；top={clock:'00:42:57', ms:'2.6 秒', state:'完成'}；more=false",
+      "status": "pass",
+      "shot": "D3-live-append.png",
+      "evidence": "注：「已加载窗口固定为 20×页数」这条性质由界面回归 tests/ui/detail-window.cjs 用 45 条请求钉住（窗口停在 40 行、更早的重新出现在「加载更多」后）。"
+    },
+    {
+      "id": "D4",
+      "title": "进行中 / 错误 / 缺首字节 三态同屏",
+      "steps": [
+        "CDP_MATCH=detail.html node tools/cdp.mjs eval \"统计各状态行数、取 live/error/缺首字节各一行的五个格子\"",
+        "CDP_MATCH=detail.html node tools/cdp.mjs eval \"document.querySelector('.detail-row.error').scrollIntoView({block:'center'})\"",
+        "CDP_MATCH=detail.html CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots-detail/D4-states.png"
+      ],
+      "expected": "进行中的那一行只显示它自己的空缺（—/—/—，状态「进行中」），不继承上一次完成的数据；错误行状态「错误」；只有时长没有首字节的那行显示 4.2 秒 / — / —",
+      "actual": "counts={ok:24, live:1, error:1}；inflight={ms:'—', ttft:'—', sp:'—', st:'进行中'}；error={ms:'1.8 秒', ttft:'700ms', sp:'—', st:'错误'}；missing={clock:'00:33:12', ms:'4.2 秒', ttft:'—', sp:'—', st:'完成'}",
+      "status": "pass",
+      "shot": "D4-states.png"
+    },
+    {
+      "id": "D5",
+      "title": "位置贴卡片（右侧无空间翻左）与 Esc 关闭",
+      "steps": [
+        "CDP_MATCH=index.html node tools/cdp.mjs eval \"({x:screenX,y:screenY,w:outerWidth,h:outerHeight})\"",
+        "CDP_MATCH=detail.html node tools/cdp.mjs eval \"({x:screenX,y:screenY,w:outerWidth,h:outerHeight})\"",
+        "CDP_MATCH=index.html CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots-detail/D5-card-and-detail-position.png",
+        "CDP_MATCH=detail.html node tools/cdp.mjs eval \"window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))\"",
+        "GET http://127.0.0.1:9223/json/list 确认只剩一个页面"
+      ],
+      "expected": "浮窗与卡片相邻（默认右侧 12px 缝隙，顶部对齐）；右侧放不下时翻到左侧同样留 12px；Esc 关闭浮窗，卡片不受影响",
+      "actual": "卡片 {x:1278, y:377, w:632}（右边缘 1910）；浮窗 {x:846, y:377, w:420} → 右侧剩余 0，翻到左侧，缝隙 = 1278-(846+420) = 12px，顶部对齐差 0；Esc 后只剩 index.html",
+      "status": "pass",
+      "shot": "D5-card-and-detail-position.png",
+      "evidence": "本机卡片停在屏幕右侧，正好实测了「右侧放不下翻左」这条规则。D5 截图是卡片窗口（入口：模型行是可点击按钮），位置关系以两窗口的 screenX/outerWidth 数值为准。"
+    }
+  ],
+  "rawEvidence": [
+    {
+      "title": "单元测试 npm test（node --test，227 项）",
+      "text": "ℹ tests 227\nℹ pass 227\nℹ fail 0\n\n本次新增：tests/route-facts.test.mjs（11，含 providerKeyOf 兜底与 clockOf 的本地 HH:MM:SS）、tests/requests.test.mjs（11，过滤/倒序+id 决胜/分页/进行中不继承/错误优先/缺失独立判定/空输入）、tests/detail-placement.test.cjs（7，右侧优先→翻左→夹取、垂直夹取、非 0 原点工作区、整数输出）。抽取共享判定后 tests/model-sessions.test.mjs 的断言文件一行未改（git diff 为空），证明重构未改行为。"
+    },
+    {
+      "title": "界面回归 tests/ui/detail-window.cjs（真实 Electron 双窗口，14 项）",
+      "text": "exit=0 PASS=14 FAIL=0\nPASS a model row is a focusable button that names its model\nPASS clicking a row asks for that provider and model\nPASS the row is reported as a control, so keyboard focus can reach it\nPASS the detail window opens with a title naming provider and model\nPASS one white row per request on the light sheet\nPASS each row carries clock, duration, first byte, pace and state\nPASS Escape closes the detail window\nPASS twenty rows a page, with the rest on demand\nPASS a newer request slides in on top without resizing the loaded window\nPASS an in-flight row shows its own gaps instead of the last completed numbers\nPASS the detail window follows the card and sits beside it\nPASS a restarted gateway leaves an empty list, not stale rows\nPASS the close button and a hidden card both close the detail window\nPASS clicking another model swaps the list in the same window"
+    },
+    {
+      "title": "既有回归（harness 已改造为只接管第一个窗口）",
+      "text": "tests/ui/model-list.cjs   exit=0 PASS=11\n  tests/ui/pointer-input.cjs exit=0 PASS=16\n  tests/ui/drag-bounds.cjs --scale=1 exit=0 PASS=7\n\nharness 改造（commit 6f6e8e6 + 663e7ca）：model-list / pointer-input / drag-bounds / material / resize-handles 的 browser-window-created 回调开头加 `if (win) return;`，使后创建的浮窗不再冒充卡片。改造前后这 3 个回归的 PASS 数完全一致；队友还用对照脚本证明：去掉 guard 后，真浮窗一出现 model-list 即在第 2 项崩溃（TypeError: reading 'hasBar'）。glass-composition.cjs 本就不注册该监听（它自己 new fixture 窗口），无需改动。"
+    },
+    {
+      "title": "环境受限项（改动前后一致，未计入验收）",
+      "text": "tests/ui/glass-composition.cjs：当前桌面会话处于锁屏状态（LogonUI 在运行，qwinsta 显示 console/administrator 会话 Active），锁屏时真实桌面窗口不绘制，其 GetPixel 采样超时 → 0 PASS；带/不带 --disable-gpu 都一样，改动前后逐字节相同（历史报告里桌面可用时为 5 PASS）。\n  tests/ui/material.cjs、tests/ui/resize-handles.cjs：本机无 GPU 会话下的既有失败，改动前基线同样失败。\n  以上三项都不作为本次验收项，但已在用例文档中标注为「环境受限」。"
+    },
+    {
+      "title": "口径说明（本次实现刻意与卡片相反的一处）",
+      "text": "主卡片回答「这个模型现在什么状态」，所以进行中时保留上一次完成请求的指标；明细浮窗回答「这一单请求发生了什么」，所以进行中的那一行只显示它自己的空缺（—）。两套规则各自有测试钉住：卡片侧在 tests/model-sessions.test.mjs，明细侧在 tests/requests.test.mjs 与 tests/ui/detail-window.cjs。\n  完整版浮窗位置/尺寸都不持久化：位置每次由卡片位置推算（默认右侧 12px，放不下翻左并夹取到工作区内），尺寸默认 420×520、可原生拖边缩放但关掉即忘。\n  隐私：明细行不显示账号，未新增暴露面。"
+    }
+  ]
+}

@@ -125,7 +125,7 @@ from urllib.parse import parse_qs, urlparse
 # Route times hang off this instant, so every run of a scenario is identical.
 BASE = datetime.now().astimezone()
 
-SCENARIOS = ("ok", "error", "live", "missing", "many", "one", "quota", "flaky", "empty")
+SCENARIOS = ("ok", "error", "live", "missing", "many", "one", "detail", "quota", "flaky", "empty")
 
 USAGE_PERIODS = ("today", "7d", "30d", "all")
 
@@ -175,6 +175,7 @@ SCENARIO_NOTES = {
     "missing": "3 rows: newest has ms but no ttft/out -> 时长 shown, 首字 —, tok/s —",
     "many": "7 served models -> 6 rows + 「+1 个模型」 summary row",
     "one": "one provider with one model: the smallest useful card",
+    "detail": "25 requests for one model: newest still streaming, one failed, one without a first byte -> the detail window pages them 20 at a time",
     "quota": "89% / 40% / 15% left -> green, amber and red bars; plus one vendor with no window at all -> no bar",
     "flaky": "ok at first, then HTTP 500 / dropped connection from the Nth trace request",
     "empty": "a live gateway that has answered nothing yet: no routes -> 等待 magpie 数据",
@@ -422,6 +423,38 @@ def scenario_quota() -> list[dict]:
     ]
 
 
+DETAIL_COUNT = 25
+
+
+def scenario_detail() -> list[dict]:
+    """One provider's model with a real history: 25 requests, the newest still
+    streaming, one that failed, and one that never reported a first byte."""
+    routes = []
+    for index in range(DETAIL_COUNT):
+        route_id = 1792464003000 + index
+        offset = index * 45
+        conv = f"01a1546e-3108-8{index:03d}"
+        if index == 0:
+            live = attempt("officeace", "alex@example.com", "glm-5.3", done=False, status=None, ms=None, ttft=None)
+            routes.append(make_route(route_id, offset, agent="dsh", requested="officeace/glm-5.3",
+                                     served="glm-5.3", provider="officeace", who="alex@example.com",
+                                     conv=conv, attempts=[live], done=False, status=None, ms=None, ttft=None))
+        elif index == 7:
+            routes.append(make_route(route_id, offset, agent="codex", requested="officeace/glm-5.3",
+                                     served="glm-5.3", provider="officeace", who="alex@example.com",
+                                     conv=conv, status=500, ms=1800, ttft=700,
+                                     error="上游返回 500：upstream_error（mock 场景 detail）"))
+        elif index == 13:
+            routes.append(make_route(route_id, offset, agent="claude", requested="officeace/glm-5.3",
+                                     served="glm-5.3", provider="officeace", who="alex@example.com",
+                                     conv=conv, ms=4200, ttft=None, out=None))
+        else:
+            routes.append(make_route(route_id, offset, agent="codex", requested="officeace/glm-5.3",
+                                     served="glm-5.3", provider="officeace", who="alex@example.com",
+                                     conv=conv, ms=2400 + index * 10, ttft=480 + index, out=200))
+    return routes
+
+
 def scenario_flaky() -> list[dict]:
     """Same data as ``ok``; the transport breaks after the first answers."""
     return scenario_ok()
@@ -439,6 +472,7 @@ BUILDERS = {
     "missing": scenario_missing,
     "many": scenario_many,
     "one": scenario_one,
+    "detail": scenario_detail,
     "quota": scenario_quota,
     "flaky": scenario_flaky,
     "empty": scenario_empty,
@@ -482,6 +516,24 @@ def usage_payload(requested: str) -> dict:
     return {"period": period, **USAGE[period]}
 
 
+GROWTH = {"next": 0}
+
+
+def grow_route(model: str, provider: str) -> dict:
+    """Put a brand-new request on top, the way magpie's own table grows while
+    the widget is watching: the next poll carries one more route, newest first.
+    """
+    global ROUTES
+    GROWTH["next"] += 1
+    step = GROWTH["next"]
+    route = make_route(1792464099000 + step, 0, agent="dsh",
+                       requested=f"{provider}/{model}", served=model, provider=provider,
+                       who="alex@example.com", conv=f"01a1546e-3108-9{step:03d}",
+                       ms=2600, ttft=520, out=208)
+    ROUTES = [route, *ROUTES]
+    return route
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "mock-magpie/1.0"
@@ -500,6 +552,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - base class signature
         parsed = urlparse(self.path)
+        if parsed.path == "/v1/magpie/grow":
+            # Development-only: let a browser check add one more request to the
+            # live table, so the detail window's live row can be observed.
+            query = parse_qs(parsed.query)
+            model = query.get("model", ["glm-5.3"])[0]
+            provider = query.get("provider", ["officeace"])[0]
+            route = grow_route(model, provider)
+            self.send_json({"added": route["id"], "routes": len(ROUTES)})
+            return
         if parsed.path == "/v1/magpie/usage":
             query = parse_qs(parsed.query)
             self.send_json(usage_payload(query.get("period", ["30d"])[0]))
