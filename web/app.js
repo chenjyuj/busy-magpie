@@ -1003,18 +1003,18 @@ function relativeTime(iso) {
   return `${Math.round(hours / 24)}d 前`;
 }
 
-// What the group head's hover says: how much is left and when it renews.
-// "0001-01-01" is magpie's marker for a vendor that never told it.
+// What the group head's hover says: how much of the window is gone and when
+// it renews. "0001-01-01" is magpie's marker for a vendor that never told it.
 function quotaTip(quota) {
-  const bits = [];
+  const bits = [`已用 ${quota.used.toFixed(1).replace(/\.0$/, '')}%`];
   if (quota.amount && quota.limit) {
-    bits.push(`已用 ${Math.round(quota.amount).toLocaleString('zh-CN')} / ${Math.round(quota.limit).toLocaleString('zh-CN')}${quota.unit ? ` ${quota.unit}` : ''}`);
+    bits.push(`${Math.round(quota.amount).toLocaleString('zh-CN')} / ${Math.round(quota.limit).toLocaleString('zh-CN')}${quota.unit ? ` ${quota.unit}` : ''}`);
   }
   if (quota.renewAt && !quota.renewAt.startsWith('0001-')) {
     const when = new Date(quota.renewAt);
     if (!Number.isNaN(when.getTime())) bits.push(`${when.getMonth() + 1}/${when.getDate()} 续期`);
   }
-  return bits.length ? `额度：${bits.join(' · ')}` : '';
+  return bits.length ? `额度窗口：${bits.join(' · ')}` : '';
 }
 
 // The provider's allowance as a horizontal bar on the group head. A bar is

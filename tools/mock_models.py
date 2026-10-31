@@ -148,6 +148,7 @@ PROVIDER_NAMES = {
     "google": "Google",
     "codearts": "CodeArts",
     "trae-cn": "Trae CN",
+    "hub-magicrew": "MagiCrew CN",
 }
 
 # Fixed allowance per provider so a screenshot can be re-checked: officeace
@@ -160,6 +161,13 @@ QUOTAS = {
     "trae-cn": {"used": 85, "amount": 5_015, "limit": 5_900, "unit": "credits"},
 }
 
+# A vendor whose quota could not be read (it refused to serve the request):
+# magpie knows the account and reports "0 used" but has no window for it. The
+# card must draw no bar at all rather than claim everything is left.
+WINDOWLESS = {
+    "hub-magicrew": {"known": True, "used": 0},
+}
+
 SCENARIO_NOTES = {
     "ok": "4 routes / 3 served models, all done/200 (glm-5.3 served by two providers -> one row)",
     "error": "3 rows: one status 500 + error, one rerouted to another model, one plain success",
@@ -167,7 +175,7 @@ SCENARIO_NOTES = {
     "missing": "3 rows: newest has ms but no ttft/out -> 时长 shown, 首字 —, tok/s —",
     "many": "7 served models -> 6 rows + 「+1 个模型」 summary row",
     "one": "one provider with one model: the smallest useful card",
-    "quota": "3 providers with 89% / 40% / 15% left -> green, amber and red allowance bars",
+    "quota": "89% / 40% / 15% left -> green, amber and red bars; plus one vendor with no window at all -> no bar",
     "flaky": "ok at first, then HTTP 500 / dropped connection from the Nth trace request",
     "empty": "a live gateway that has answered nothing yet: no routes -> 等待 magpie 数据",
 }
@@ -234,6 +242,9 @@ def attempt(provider: str, who: str, model: str, *, done: bool = True,
             "renews": ["2026-11-19T16:00:00Z"],
             "usedRenews": "2026-11-19T16:00:00Z",
         })
+    windowless = WINDOWLESS.get(provider)
+    if windowless:
+        order_item.update(windowless)
     return try_item, order_item
 
 
@@ -393,7 +404,8 @@ def scenario_one() -> list[dict]:
 
 
 def scenario_quota() -> list[dict]:
-    """Three providers leaving 89% (green), 40% (amber) and 15% (red)."""
+    """Three providers leaving 89% (green), 40% (amber), 15% (red), plus one
+    vendor whose quota could not be read at all (no bar)."""
     return [
         make_route(1792464002701, 10, agent="codex", requested="officeace/glm-5.3",
                    served="glm-5.3", provider="officeace", who="alex@example.com",
@@ -404,6 +416,9 @@ def scenario_quota() -> list[dict]:
         make_route(1792464002703, 70, agent="claude", requested="trae-cn/deepseek-v4.1-flash",
                    served="deepseek-v4.1-flash", provider="trae-cn", who="t97226@example.com",
                    conv="01a1546e-3108-77a3", ms=3800, ttft=760, out=304),
+        make_route(1792464002704, 100, agent="dsh", requested="hub-magicrew/glm-5.3",
+                   served="glm-5.3", provider="hub-magicrew", who="mc131@example.com",
+                   conv="01a1546e-3108-77a4", ms=2600, ttft=540, out=208),
     ]
 
 

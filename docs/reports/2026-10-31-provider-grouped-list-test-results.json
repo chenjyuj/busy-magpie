@@ -1,6 +1,6 @@
 {
   "title": "busy-magpie v1.6.0 Provider 分组模型列表 · 浏览器实测报告",
-  "summary": "按设计文档把卡片主视图改为「按 Provider 分组 + 组头额度进度条 + 进行中保留上次指标」的浅灰不透明卡片后，用真实 Electron 窗口（CDP 驱动）+ mock magpie 网关逐场景实测：8 个场景全部通过——Provider 分组与额度条三色档（89% 绿 / 40% 橙 / 15% 红）、无额度不画条、进行中保留上一次完成的时长/首字节/速度、缺失指标显示破折号、失败行显示错误、7 模型上限与「+N 个模型」汇总、断线保留上一帧并标「重连中」、空态「等待 magpie 数据」。同期单元测试 197/197、界面回归 model-list 11/11、pointer-input 16/16、drag-bounds 7/7 全绿。",
+  "summary": "按设计文档把卡片主视图改为「按 Provider 分组 + 组头额度进度条 + 进行中保留上次指标」的浅灰不透明卡片后，用真实 Electron 窗口（CDP 驱动）+ mock magpie 网关逐场景实测：8 个场景全部通过——Provider 分组与额度条三色档（89% 绿 / 40% 橙 / 15% 红）、**无额度窗口的厂商不画条**（修掉「假 100%」）、进行中保留上一次完成的时长/首字节/速度、缺失指标显示破折号、失败行显示错误、7 模型上限与「+N 个模型」汇总、断线保留上一帧并标「重连中」、空态「等待 magpie 数据」。另用 tools/quota-audit.mjs 对真实 magpie 网关（:3425）逐个账号核对判定。同期单元测试 198/198、界面回归 model-list 11/11、pointer-input 16/16、drag-bounds 7/7 全绿。",
   "environment": [
     { "k": "操作系统", "v": "Windows 10.0.19041（x64）" },
     { "k": "Node", "v": "v24.21.0" },
@@ -28,17 +28,18 @@
     },
     {
       "id": "S2",
-      "title": "quota 场景：额度条按剩余量显示绿 / 橙 / 红",
+      "title": "quota 场景：额度条按剩余量显示绿 / 橙 / 红，无额度窗口则不画条",
       "steps": [
         "python tools/mock_models.py 3500 quota",
         "node tools/cdp.mjs eval \"[...document.querySelectorAll('.provider-bar i')].map(b=>({cls:b.className,w:b.style.width}))\"",
+        "node tools/cdp.mjs eval \"[...document.querySelectorAll('.provider-group')].map(g=>({p:g.dataset.provider,q:g.querySelector('.provider-left')?.textContent||'（无条）'}))\"",
         "CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots-v2/S2-quota.png"
       ],
-      "expected": "OfficeAce 89% 绿色、CodeArts 40% 橙色、Trae CN 15% 红色，三条进度条宽度分别为 89% / 40% / 15%",
-      "actual": "OfficeAce 89%（class 空=绿）、CodeArts 40%（class=mid，橙）、Trae CN 15%（class=low，红），宽度 89% / 40% / 15% 全部符合",
+      "expected": "OfficeAce 89% 绿色、CodeArts 40% 橙色、Trae CN 15% 红色，三条进度条宽度分别为 89% / 40% / 15%；MagiCrew CN 只报 known + used=0 而没有额度窗口，组头只显示名字、不显示「剩余」也不画条",
+      "actual": "4 个组：OfficeAce 89%（class 空=绿）、CodeArts 40%（class=mid，橙）、Trae CN 15%（class=low，红）、MagiCrew CN 无条（q 为空字符串、无 .provider-bar）；宽度 89% / 40% / 15% 全部符合，无 100% 假读数",
       "status": "pass",
       "shot": "S2-quota.png",
-      "evidence": "bars=[{cls:'',w:'89%'},{cls:'mid',w:'40%'},{cls:'low',w:'15%'}]"
+      "evidence": "bars=[{cls:'',w:'89%'},{cls:'mid',w:'40%'},{cls:'low',w:'15%'}]；groups=4，MagiCrew CN q='' 无条"
     },
     {
       "id": "S3",
@@ -124,12 +125,32 @@
       "status": "pass",
       "shot": "S8-empty.png",
       "evidence": "rows=0 groups=0 emptyShown=true live=实时"
+    },
+    {
+      "id": "S9",
+      "title": "真实网关：本机安装版（1.6.0）对着真实 magpie 的实拍",
+      "steps": [
+        "同步修复到 %LOCALAPPDATA%\\Programs\\Busy Magpie\\resources\\app（src/ + web/ + package.json）",
+        "& \"%LOCALAPPDATA%\\Programs\\Busy Magpie\\Busy Magpie.exe\" --remote-debugging-port=9224",
+        "CDP_PORT=9224 node tools/cdp.mjs eval \"[...document.querySelectorAll('.provider-group')].map(g=>({p:g.dataset.provider,q:g.querySelector('.provider-left')?.textContent||'（无条）'}))\"",
+        "node tools/quota-audit.mjs（用渲染层同一个 providerSessionGroups 核对每个账号的判定）",
+        "CDP_PORT=9224 CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots-v2/S9-real-gateway.png"
+      ],
+      "expected": "真实数据下：有额度窗口的供应商照常显示百分比与条；没有窗口的（超级麦吉国内版 hub-magicrew：known=true, used=0, limit 缺失）不画条、不显示「剩余 100%」",
+      "actual": "卡片实拍显示 Trae CN 剩余 63%（绿）与 Loomy 剩余 82%（绿），其中 Trae CN 一行是进行中且保留着上次完成的 4.9 秒 / 3.8s / 123 tok/s；审计表里 hub-magicrew 与 hub-magicrew-intl、qoder-cn、hub-lobsterai、autoclaw(-cn) 全部判定为「不画条」",
+      "status": "pass",
+      "shot": "S9-real-gateway.png",
+      "evidence": "真实网关 groups=2（trae-cn 63%、loomy 82%）；seat 判定：hub-magicrew known=true used=0 limit=undefined → 不画条"
     }
   ],
   "rawEvidence": [
     {
-      "title": "单元测试 npm test（node --test，197 项）",
-      "text": "ℹ tests 197\nℹ pass 197\nℹ fail 0\nℹ duration_ms ~21000\n\n包含重写的 tests/model-sessions.test.mjs（13 项：Provider 分组与组排序、seat provider 优先、无 provider 兜底、组内模型去重、额度取数与空额度、进行中保留最近完成指标、从未完成显示空指标、三态判定、行数上限、改道计数、组账号取最新 seat）与 tests/timing.test.mjs（5 项速度口径）。"
+      "title": "真实网关审计 tools/quota-audit.mjs（修复「假 100%」的直接证据）",
+      "text": "node tools/quota-audit.mjs（读取本机真实 magpie :3425，跑渲染层同一个 providerSessionGroups）\n\n各供应商最新 seat 的原始字段与判定：\n  hub-magicrew       known=true used=0 limit=undefined unit=undefined → 不画条   ← 用户报的「超级麦吉国内版」\n  hub-magicrew-intl  known=true used=70 limit=50 unit=积分 → 画条（剩余 6.00%）\n  qoder-cn           known=true used=0 limit=undefined → 不画条\n  hub-lobsterai      known=true used=0 limit=undefined → 不画条\n  autoclaw/autoclaw-cn known=undefined used=0 limit=undefined → 不画条\n  workbuddy          known=true used=11.1385 limit=3400 credits → 画条（剩余 88.86%）\n  workbuddy-ai       known=true used=0.005043 limit=100000000 tokens → 画条（剩余 99.99%）\n  loomy              known=true used=50 limit=5000 credits → 画条（剩余 50%）\n  officeace          known=true used=100 limit=4600 credits → 画条（剩余 0%）\n  codearts           known=true used=100 limit=9600 credits → 画条（剩余 0%）\n  raccoon            known=true used=0 limit=8100 credits → 画条（剩余 100%）\n  trae-cn            known=true used=45.8 limit=5900 credits → 画条（剩余 54.2%）\n\n结论：修复前 hub-magicrew（超级麦吉国内版）因 used=0 且无 limit 被算成「剩余 100%」；修复后不画条。\n注：条上的百分比是 magpie 的额度窗口模型（used=窗口消耗百分比，与 magpie 额度页同口径），不是供应商账户的实时积分余额——trace 里没有实时余额字段。"
+    },
+    {
+      "title": "单元测试 npm test（node --test，198 项）",
+      "text": "ℹ tests 198\nℹ pass 198\nℹ fail 0\n\n包含重写的 tests/model-sessions.test.mjs（14 项：Provider 分组与组排序、seat provider 优先、无 provider 兜底、组内模型去重、额度取数与空额度、**无额度窗口时不画条（新增，钉住「假 100%」缺陷）**、进行中保留最近完成指标、从未完成显示空指标、三态判定、行数上限、改道计数、组账号取最新 seat）与 tests/timing.test.mjs（5 项速度口径）。"
     },
     {
       "title": "界面回归 tests/ui/model-list.cjs（真实 Electron，11 项）",

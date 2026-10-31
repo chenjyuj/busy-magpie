@@ -26,6 +26,7 @@
 | PG-04 | 同一供应商下同一模型只占一行 | 同一 provider 的同名模型两条 route | 1. 分组 | 组内该模型一行，取最新一条 | 单测 | `tests/model-sessions.test.mjs`「each provider keeps one row per model, newest first」 |
 | PG-05 | 组头额度取自最近使用的账号 | `order[]` 带 `known/used/amount/limit/unit/renews` | 1. 分组 2. 读 `quota` | `remaining = 100 - used`（夹取 0–100），其余字段原样 | 单测 | `tests/model-sessions.test.mjs`「the quota comes from the provider seat and is clamped to 0-100」 |
 | PG-06 | 没有额度数据时无进度条 | `known` 缺失或 `used` 非有限数 | 1. 分组 2. 读组头 | `quota` 为 null，界面不画条 | 单测 + 界面回归 | `tests/model-sessions.test.mjs`「a seat without known or with a non-finite used has no quota」；`tests/ui/model-list.cjs`「a provider with no reported allowance shows no bar at all」 |
+| PG-06b | **没有额度窗口时不得谎报 100%** | `known: true, used: 0`，但 `limit` 缺失或为 0（按量计费 Key，或供应商接口报错、magpie 没读到额度） | 1. 分组 2. 读 `quota` 与组头 | `quota` 为 null，**不画条**、不显示「剩余 100%」 | 单测 + 界面回归 | `tests/model-sessions.test.mjs`「a seat without a quota window has no allowance, not a full one」；`tests/ui/model-list.cjs` 同 PG-06 用例后半段；真实网关核对 `tools/quota-audit.mjs` |
 | PG-07 | 额度条按剩余量分三档 | 剩余 89% / 40% / 15% | 1. 读 `.provider-bar i` 的 class 与宽度 | 89% 无 class（绿）、40% `mid`（橙）、15% `low`（红）；宽度等于剩余百分比 | 界面回归 + 浏览器实测 | `tests/ui/model-list.cjs`「the allowance bar is green, amber or red by what is left」；报告场景 S2 |
 | PG-08 | 进行中的请求保留上一次完成的数据 | 同一 provider+model 先有一条已完成，再有一条进行中 | 1. 渲染 2. 读该行三项指标与状态 | 指标仍是上一次完成请求的值；状态为「进行中」 | 单测 + 界面回归 + 浏览器实测 | `tests/model-sessions.test.mjs`「a live request keeps the metrics of the last completed one」；`tests/ui/model-list.cjs` 同名用例；报告场景 S3 |
 | PG-09 | 从未完成的请求没有指标 | 只有一条进行中的请求 | 1. 渲染 2. 读该行 | 三项均为 `—`，不是 0 | 单测 + 界面回归 | `tests/model-sessions.test.mjs`「a model that has never completed shows no metrics, not zero」；`tests/ui/model-list.cjs`「missing measurements read as a dash…」 |
@@ -49,11 +50,17 @@
 | 需求（来自设计） | 用例 |
 | --- | --- |
 | 按 Provider 分组显示模型 | PG-01、PG-02、PG-03、PG-04 |
-| 额度显示在 Provider 上 | PG-05、PG-06、PG-07、PG-14 |
+| 额度显示在 Provider 上 | PG-05、PG-06、PG-06b、PG-07、PG-14 |
 | 进行中不影响显示上一次的数据 | PG-08、PG-09、PG-16 |
 | 保留拖边缩放 | PG-19、PG-20 |
 | 样式参照截图（浅灰卡片 + 组头 + 进度条） | PG-15、PG-07、PG-11 |
 | 附带清理（透明度设置移除） | PG-21、PG-22、PG-23 |
+
+## 额度口径（与供应商余额的区别）
+
+- 组头百分比 = `100 - order[].used`，其中 `used` 是**该账号额度窗口已消耗的百分比**，`limit` 是窗口大小；与 magpie 额度页同口径（例如 WorkBuddy 11.14% → 剩余 88.86%，magpie 页面显示 89%）。
+- **必须 `known === true` 且 `limit > 0`** 才画条。只有一个 `used: 0` 而无窗口时，那表示「magpie 没有这个账号的窗口数据」（按量计费 Key，或供应商接口失败导致额度没读到），此时不画条。历史上这里会把 `used: 0` 当成「剩余 100%」并画出满格绿条——PG-06b 就是钉住这个缺陷的回归。
+- trace 里没有供应商的**实时积分余额**字段，所以供应商接口回「积分不足」时，卡片可能仍显示窗口剩余若干（那是 magpie 上次读到的窗口读数）。真实网关核对方式：`node tools/quota-audit.mjs`（用渲染层同一个 `providerSessionGroups` 打印每个账号的判定与原始字段）。
 
 ## 维护约定
 

@@ -86,6 +86,17 @@ test('a seat without known or with a non-finite used has no quota', () => {
   assert.equal(badUsed.groups[0].quota, null);
 });
 
+test('a seat without a quota window has no allowance, not a full one', () => {
+  // A pay-as-you-go key, or a vendor whose quota could not be read: magpie
+  // reports "known" and "0 used" but no window. Reading that as "100% left"
+  // would be a lie, so the card draws no bar at all.
+  const windowless = providerSessionGroups([
+    withQuota(route(1, { provider: 'magicrew' }), { known: true, used: 0, renews: [] }),
+  ]);
+  assert.equal(windowless.groups[0].quota, null);
+  assert.equal(windowless.groups[0].provider, 'OfficeAce');
+});
+
 test('a live request keeps the metrics of the last completed one', () => {
   const { groups } = providerSessionGroups([
     route(1, { served: 'alpha', ms: 3000, ttft: 600 }),

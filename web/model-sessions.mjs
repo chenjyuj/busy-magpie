@@ -42,20 +42,24 @@ function statusOf(route) {
   return 'ok';
 }
 
-// The account's own allowance, as its order entry carries it: "known" says
-// the vendor told magpie what is left, "used" is the share of the window the
-// model counts against. A key with no subscription has neither.
+// The account's own allowance window, as its order entry carries it: "known"
+// says the vendor told magpie about a window, "used" is the share of that
+// window the model count has consumed. An account without a window (a
+// pay-as-you-go key, or a vendor whose quota could not be read) reports
+// nothing to show: its "0 used" would read as "100% left", which is a lie.
 function quotaOf(seat) {
-  if (!seat || !seat.known) return null;
+  if (!seat || seat.known !== true) return null;
   const used = Number(seat.used);
   if (!Number.isFinite(used)) return null;
+  const limit = Number(seat.limit) || 0;
+  if (limit <= 0) return null;
   const renews = Array.isArray(seat.renews) ? seat.renews : [];
   return {
     used: Math.max(0, Math.min(100, used)),
     remaining: Math.max(0, Math.min(100, 100 - used)),
     renewAt: seat.usedRenews || renews[0] || '',
     amount: Number(seat.amount) || 0,
-    limit: Number(seat.limit) || 0,
+    limit,
     unit: String(seat.unit || ''),
   };
 }
@@ -83,13 +87,16 @@ export function providerSessionGroups(routes, { limit = 6 } = {}) {
       group = { key, provider: '', account: '', quota: null, at: route.time, models: [] };
       groups.set(key, group);
     }
-    // The group remembers the provider's most recent seat: its account and
-    // allowance are what the group header shows. Routes arrive newest first,
-    // so only the first one seen for a group gets to say.
+    // The group remembers the provider's most recent seat: its account is
+    // what the group header names. Routes arrive newest first, so only the
+    // first one seen for a group gets to say.
     if (!group.seen) {
       group.seen = true;
       group.provider = String(seat?.name || '').trim();
       group.account = String(seat?.who || '');
+      // The bar describes the account this group names, so it comes from that
+      // very seat: a seat that reports no window means nothing is left to
+      // show, not that everything is left.
       group.quota = quotaOf(seat);
       group.at = route.time;
     }

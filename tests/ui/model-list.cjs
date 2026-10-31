@@ -59,6 +59,7 @@ const route = (id, served, extra = {}) => {
     used: extra.used === undefined ? 11 : extra.used,
     amount: 5755, limit: 9600, unit: 'credits',
     renews: ['2026-11-19T16:00:00Z'], usedRenews: '2026-11-19T16:00:00Z',
+    ...(extra.windowless ? { amount: undefined, limit: undefined, unit: undefined } : {}),
   };
   return {
     id, time: new Date(Date.now() - id * 5000).toISOString(), agent: 'dsh',
@@ -139,11 +140,17 @@ async function run() {
     assert.equal(tints['p-low'].barClass, 'low');
     record('the allowance bar is green, amber or red by what is left');
 
-    // 3. A provider without a reported allowance shows no bar.
+    // 3. A provider without a reported allowance shows no bar — neither when it
+    //    reports nothing, nor when it reports "known, 0 used" but no window
+    //    (a vendor whose quota could not be read must not read as 100% left).
     await feed([route(1, 'anon-model', { provider: 'p-anon', known: false })]);
     const anon = (await groups())[0];
     assert.equal(anon.hasBar, false);
     assert.equal(anon.remaining, null);
+    await feed([route(1, 'blind-model', { provider: 'p-blind', known: true, used: 0, windowless: true })]);
+    const blind = (await groups())[0];
+    assert.equal(blind.hasBar, false, 'a windowless seat must not claim 100% left');
+    assert.equal(blind.remaining, null);
     record('a provider with no reported allowance shows no bar at all');
 
     // 4. A live request keeps the last completed metrics and only flips the state.
