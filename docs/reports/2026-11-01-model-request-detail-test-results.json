@@ -1,6 +1,6 @@
 {
   "title": "busy-magpie v1.7.0 模型请求明细浮窗 · 浏览器实测报告",
-  "summary": "按设计文档实现「点击模型行 → 独立浮窗逐行列出该 provider 该模型的每一次请求（时间/时长/首字节/tok·s/状态）」后，用真实 Electron 双窗口 + mock magpie 网关实测 5 个场景：首屏 20 条、加载更多、实时置顶追加、进行中/错误/缺首字节三态、位置贴卡片（右侧无空间时翻左 12px）与 Esc 关闭——全部通过。同期单元测试 227/227、界面回归 detail-window 14/14、model-list 11/11、pointer-input 16/16、drag-bounds 7/7 全绿；glass-composition 因当前会话锁屏（LogonUI 在跑）在改动前后同样 0 PASS，属环境限制。",
+  "summary": "按设计文档实现「点击模型行 → 独立浮窗逐行列出该 provider 该模型的每一次请求（时间/时长/首字节/tok·s/状态）」后，用真实 Electron 双窗口 + mock magpie 网关实测 5 个场景：首屏 20 条、加载更多、实时置顶追加、进行中/错误/缺首字节三态、位置贴卡片（右侧无空间时翻左 12px）与 Esc 关闭——全部通过；另在本机安装版 1.7.0 上对着**真实 magpie 网关**实拍确认可用（D6）。同期单元测试 227/227、界面回归 detail-window 14/14、model-list 11/11、pointer-input 16/16、drag-bounds 7/7 全绿；glass-composition 因当前会话锁屏（LogonUI 在跑）在改动前后同样 0 PASS，属环境限制。",
   "environment": [
     { "k": "操作系统", "v": "Windows 10.0.19041（x64），当前桌面会话为锁屏状态（LogonUI 在运行）" },
     { "k": "Node / Electron", "v": "Node v24.21.0 / Electron 39.8.10（preview 模式，独立 profile）" },
@@ -82,6 +82,22 @@
       "status": "pass",
       "shot": "D5-card-and-detail-position.png",
       "evidence": "本机卡片停在屏幕右侧，正好实测了「右侧放不下翻左」这条规则。D5 截图是卡片窗口（入口：模型行是可点击按钮），位置关系以两窗口的 screenX/outerWidth 数值为准。"
+    },
+    {
+      "id": "D6",
+      "title": "真实网关：本机安装版 1.7.0 对着真实 magpie 的实拍",
+      "steps": [
+        "同步 1.7.0 到 %LOCALAPPDATA%\\Programs\\Busy Magpie\\resources\\app（src/ + web/ + package.json，含新增的 detail.html/detail.js/requests.mjs/route-facts.mjs/detail-placement.cjs）",
+        "& \"%LOCALAPPDATA%\\Programs\\Busy Magpie\\Busy Magpie.exe\" --remote-debugging-port=9224",
+        "CDP_PORT=9224 CDP_MATCH=index.html node tools/cdp.mjs eval \"document.querySelector('.model-row').click()\"",
+        "GET http://127.0.0.1:9224/json/list —— 应同时出现 index.html 与 detail.html",
+        "CDP_PORT=9224 CDP_MATCH=detail.html node tools/cdp.mjs eval \"({title, rows, more})\"",
+        "CDP_PORT=9224 CDP_MATCH=detail.html CDP_SCALE=2 node tools/cdp.mjs shot docs/reports/screenshots-detail/D6-real-gateway.png"
+      ],
+      "expected": "真实网关下点行同样打开浮窗；标题是该供应商与该模型；逐行列出真实请求的时间/时长/首字节/tok·s/状态；缺 tok/s 的行显示 —",
+      "actual": "卡片上两个可点模型行（tabIndex=0）；点击后出现 detail.html；标题「Trae CN · deepseek-v4.1-flash-max」；rows=20；more=true；前三行 10.8 秒/4.5s/104 tok/s、6.2 秒/4.1s/82 tok/s、11.8 秒/4.5s/105 tok/s，其中一条只有首字没有 tok/s 的显示为 —",
+      "status": "pass",
+      "shot": "D6-real-gateway.png"
     }
   ],
   "rawEvidence": [

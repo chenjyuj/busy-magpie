@@ -40,6 +40,7 @@
 | PG-D17 | 抽取未改行为 | — | 1. `npm test` 2. `git diff tests/model-sessions.test.mjs` | 227/227 全绿；断言文件一行未改 | 单测 + git | 计划 Task 1 验收；报告「单元测试」条目 |
 | PG-D18 | 既有回归不受浮窗影响 | harness 已改造 | 1. 跑三个既有回归 | model-list 11/11、pointer-input 16/16、drag-bounds 7/7 | UI 回归 | `tests/ui/{model-list,pointer-input,drag-bounds}.cjs`；报告「既有回归」条目 |
 | PG-D19 | 文档与报告 | — | 1. 核对 README 小节 2. 打开报告 | README 有「请求明细浮窗」说明；报告 5 场景全过、含截图与命令 | 人工核对 | `README.md`；`docs/reports/2026-11-01-model-request-detail-test-report.html` |
+| PG-D20 | 真实网关可用性 | 本机安装版已同步 1.7.0 | 1. 启动安装版并开 CDP 2. 点模型行 3. 读浮窗标题与行 | 真实网关下同样开窗；标题为该供应商与该模型；逐行给出真实时间/时长/首字节/tok·s/状态 | 浏览器实测（真实网关） | 报告 D6（`docs/reports/screenshots-detail/D6-real-gateway.png`） |
 
 ## 覆盖矩阵（对设计文档 §11 验收标准）
 
