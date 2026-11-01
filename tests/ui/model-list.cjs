@@ -109,7 +109,9 @@ async function run() {
     // 1. One group per provider, newest first, one row per model.
     await feed([
       route(1, 'glm-5.3', { provider: 'officeace', providerName: 'OfficeAce' }),
-      route(2, 'claude-sonnet-4-5', { provider: 'officeace', providerName: 'OfficeAce' }),
+      route(2, 'claude-sonnet-4-5', { provider: 'officeace', providerName: 'OfficeAce',
+        tries: [{ id: 'acct-9', model: 'glm-5.3', done: true, status: 200, ms: 900 },
+          { id: 'acct-2', model: 'claude-sonnet-4-5', done: true, status: 200, ms: 3000 }] }),
       route(3, 'deepseek-v4.1-flash', { provider: 'workbuddy', providerName: 'WorkBuddy AI', used: 0 }),
     ]);
     const two = await groups();
@@ -123,13 +125,45 @@ async function run() {
     assert.equal(two[0].models.length, 2);
     assert.equal(two[1].models.length, 1);
     for (const row of two[0].models) {
-      assert.equal(row.ms, '3.0 秒');
+      assert.equal(row.ms, '3.0s');
       assert.equal(row.ttft, '600ms');
       assert.equal(row.speed, '100 tok/s');
       assert.equal(row.state, '完成');
     }
+    assert.equal(two[0].models[1].reroute, '改道 1 次');
     fs.writeFileSync(path.join(output, 'groups.png'), (await win.webContents.capturePage()).toPNG());
     record('groups come one per provider with its allowance, one row per model');
+
+    // 1b. A row reads in two tiers: the model name carries it on the first
+    //     line, the measurements sit under it, and both are sized so the
+    //     default window's ~0.56 canvas scale still leaves them readable.
+    const tiers = await js(`(()=>{const row=document.querySelector('.model-row');
+      const main=row.querySelector('.row-main');
+      const metrics=row.querySelector('.row-metrics');
+      const name=row.querySelector('.model-name');
+      const state=row.querySelector('.state-word');
+      const cols=[...metrics.querySelectorAll('.col-ms, .col-ttft, .col-speed')];
+      const ui=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui'))||1;
+      const px=s=>Math.round(parseFloat(s)*10)/10;
+      return {
+        mainHasName: Boolean(main && main.contains(name)),
+        mainHasState: Boolean(main && main.contains(state)),
+        metricsHasAll: Boolean(metrics && cols.length===3 && cols.every(c=>metrics.contains(c))),
+        nameSize: px(getComputedStyle(name).fontSize),
+        metricSize: px(getComputedStyle(metrics).fontSize),
+        rowHeight: px(getComputedStyle(row).height),
+        ui,
+      };})()`);
+    assert.ok(tiers.mainHasName && tiers.mainHasState, 'the name line carries the model and its state');
+    assert.ok(tiers.metricsHasAll, 'all three measurements share the line under the name');
+    assert.ok(tiers.nameSize >= 20, `the model name is at least 20px on the canvas (${tiers.nameSize})`);
+    assert.ok(tiers.metricSize >= 16, `the measurements are at least 16px on the canvas (${tiers.metricSize})`);
+    assert.equal(tiers.rowHeight, 60, 'the taller two-tier row');
+    assert.ok(tiers.nameSize * tiers.ui >= 11,
+      `the name reaches the default window at ${(tiers.nameSize * tiers.ui).toFixed(1)}px`);
+    assert.ok(tiers.metricSize * tiers.ui >= 8.5,
+      `the measurements reach the default window at ${(tiers.metricSize * tiers.ui).toFixed(1)}px`);
+    record('each row reads in two tiers, sized to survive the default scale');
 
     // 2. The allowance bar is tinted by what is left.
     await feed([
@@ -166,7 +200,7 @@ async function run() {
     const liveRow = (await groups())[0].models[0];
     assert.equal(liveRow.status, 'live');
     assert.equal(liveRow.state, '进行中');
-    assert.equal(liveRow.ms, '3.0 秒');
+    assert.equal(liveRow.ms, '3.0s');
     assert.equal(liveRow.ttft, '600ms');
     assert.equal(liveRow.speed, '100 tok/s');
     fs.writeFileSync(path.join(output, 'live.png'), (await win.webContents.capturePage()).toPNG());
@@ -182,7 +216,7 @@ async function run() {
     await feed([route(1, 'sparse', { provider: 'p-b', ms: 4200, ttft: 0, out: 0,
       tries: [{ id: 'acct-1', model: 'sparse', done: true, status: 200, ms: 4200 }] })]);
     const sparse = (await groups())[0].models[0];
-    assert.equal(sparse.ms, '4.2 秒');
+    assert.equal(sparse.ms, '4.2s');
     assert.equal(sparse.ttft, '—');
     assert.equal(sparse.speed, '—');
     const body = await js('document.querySelector(".model-rows, .provider-groups").textContent');

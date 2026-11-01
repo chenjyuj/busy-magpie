@@ -391,9 +391,11 @@ body.can-grab .drag-grip {
   flex-direction: column;
 }
 
-/* The card's contents are drawn on a fixed 600×400 canvas and scaled to fit
+/* The card's contents are drawn on a fixed 500×333 canvas and scaled to fit
    whatever the window became, so text, gaps, nodes and wires all grow
-   together instead of leaving empty space. */
+   together instead of leaving empty space. The canvas stays small enough that
+   a 316×221 window still lands near --ui 0.56, where the 20px name row and the
+   16px measurements read at 11.2px and 9px instead of shrinking away. */
 .stage-area {
   position: relative;
   z-index: 1;
@@ -429,8 +431,8 @@ body.native-material .node { background-color: rgb(12 16 25 / 0.32); }
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 600px;
-  height: 400px;
+  width: 500px;
+  height: 333px;
   transform: translate(-50%, -50%) scale(var(--ui, 1));
   transform-origin: center center;
   pointer-events: none;
@@ -3321,7 +3323,7 @@ body.native-material .card {
    heights it measures come back already scaled), so only the grid needs
    adjusting here. */
 .content {
-  grid-template-rows: 30px 10px 1fr 6px 16px;
+  grid-template-rows: 30px 10px 1fr 6px 22px;
 }
 
 .model-list {
@@ -3361,7 +3363,7 @@ body.native-material .card {
 .provider-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
 }
 
 .provider-head {
@@ -3370,10 +3372,10 @@ body.native-material .card {
   justify-content: space-between;
   gap: 10px;
   padding: 0 4px;
-  color: #86868b;
-  font-size: 10px;
+  color: #6e6e73;
+  font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -3386,16 +3388,16 @@ body.native-material .card {
 }
 
 .provider-left {
-  color: #86868b;
-  font-size: 10px;
+  color: #6e6e73;
+  font-size: 13px;
   white-space: nowrap;
 }
 
 .provider-bar {
-  width: 80px;
-  height: 4px;
+  width: 96px;
+  height: 6px;
   overflow: hidden;
-  border-radius: 2px;
+  border-radius: 3px;
   background: #e5e5ea;
 }
 
@@ -3409,18 +3411,24 @@ body.native-material .card {
 .provider-bar i.mid { background: #ff9500; }
 .provider-bar i.low { background: #ff3b30; }
 
+/* ── one row per model ───────────────────────────────────────────────────────
+   The card is a 500x333 canvas scaled to the window, which lands near 0.56 —
+   canvas type much below 20px arrives on screen too small to read. A row
+   therefore reads in two tiers: the model name carries the first line at 20px
+   with the state word at its right edge, and the measurements sit under it at
+   16px, where a middot still separates them. */
 .model-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
-  gap: 14px;
-  align-items: center;
-  height: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  height: 60px;
   padding: 0 14px;
-  border-radius: 12px;
+  border-radius: 14px;
   background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   color: #3a3a3c;
-  font-size: 12px;
+  font-size: 20px;
   /* A row opens that model's request detail, so it reads as a button. The
      card's chrome is pointer-transparent (#app carries pointer-events: none
      and every interactive control opts back in), so a row has to opt back in
@@ -3443,45 +3451,91 @@ body.native-material .card {
 
 body.noanim .model-row { transition: none; }
 
-.col-model {
+/* The name line: status light, model name, state word pushed to the right. */
+.row-main {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   min-width: 0;
 }
+
+/* The status light is 5px elsewhere on the card; on a row it has to stay a dot
+   after the shrink. The dark-theme glow is dropped — on a white row it only
+   smears. */
+.model-row .status-dot {
+  width: 9px;
+  height: 9px;
+  margin-right: 0;
+  box-shadow: none;
+}
+
+.model-row .status-dot.good { background: var(--good); }
+.model-row .status-dot.accent { background: var(--accent); }
+.model-row .status-dot.bad { background: var(--bad); }
 
 .model-name {
   overflow: hidden;
   color: #1d1d1f;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 24px;
   letter-spacing: -0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.row-reroute {
-  flex: none;
-  color: #ff9500;
-  font-size: 9.5px;
-  font-style: normal;
-}
-
 .state-word {
-  color: #86868b;
-  font-size: 11px;
+  flex: none;
+  margin-left: auto;
+  color: #6e6e73;
+  font-size: 15px;
+  font-weight: 500;
   white-space: nowrap;
 }
 
 .model-row.live .state-word { color: #007aff; }
 .model-row.error .state-word { color: #ff3b30; }
 
+/* The measurements line: one row of numbers, kept apart by middots so three
+   values still read as three values. */
+.row-metrics {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+  color: #6e6e73;
+  font-size: 16px;
+  line-height: 19px;
+  white-space: nowrap;
+}
+
+.row-metrics > * { flex: none; }
+
+.row-metrics > *:not(:last-child)::after {
+  content: "·";
+  margin-left: 6px;
+  color: #c7c7cc;
+}
+
+/* A rerouted request is rare, and its tag is mostly contoured shape at this
+   scale: a small amber chip rather than a word lost in the metrics line. */
+.row-reroute {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: rgba(255, 149, 0, 0.16);
+  color: #b25f00;
+  font-size: 15px;
+  font-style: normal;
+  line-height: 19px;
+}
+
 .col-ms,
 .col-ttft,
 .col-speed {
   overflow: hidden;
   color: #3a3a3c;
-  font-size: 12px;
-  text-align: right;
+  font-size: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3493,20 +3547,21 @@ body.noanim .model-row { transition: none; }
 .model-empty {
   margin: 0;
   padding: 18px 0;
-  color: #86868b;
+  color: #6e6e73;
+  font-size: 16px;
   text-align: center;
 }
 
 .model-hidden {
   margin: 0;
-  color: #86868b;
-  font-size: 10.5px;
+  color: #6e6e73;
+  font-size: 14px;
   text-align: right;
 }
 
 /* A dropped gateway keeps the last frame and labels it, instead of blanking a
    list the user is still reading. */
-body.stale .provider-groups { opacity: 0.55; }
+body.stale .provider-groups { opacity: 0.7; }
 
 body.stale .live-word::after {
   content: " · 暂未刷新";
@@ -3518,8 +3573,8 @@ body.stale .live-word::after {
   display: flex;
   gap: 8px;
   align-items: center;
-  font-size: 10px;
-  color: #86868b;
+  font-size: 14px;
+  color: #6e6e73;
 }
 
 /* Small chrome bits that were tuned for the dark card. */

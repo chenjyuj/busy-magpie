@@ -50,6 +50,20 @@ export function formatDuration(ms) {
   return rest === 0 ? `${minutes} 分` : `${minutes} 分 ${rest} 秒`;
 }
 
+// The model rows sit on the scaled card, where a Chinese unit inside a mono
+// line smears at about seven pixels; those rows print the ascii form the rest
+// of the line already uses ("600ms", "100 tok/s"). The request detail window
+// is an ordinary window and keeps the Chinese form above.
+export function formatDurationShort(ms) {
+  if (!ms || ms <= 0) return '—';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
+}
+
 // A first-byte reading, printed the way the card's row already printed it:
 // milliseconds below a second, seconds above it, a dash when magpie reported
 // nothing at all.

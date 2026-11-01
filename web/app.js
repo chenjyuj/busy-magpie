@@ -1,5 +1,5 @@
 import {
-  formatDuration,
+  formatDurationShort,
   formatLatency,
   formatTokens,
   mask,
@@ -72,8 +72,12 @@ function applyFrame(next) {
 
 // The card is drawn on a fixed canvas and scaled to fit the window, so a
 // bigger window means bigger text, nodes and wires rather than empty space.
-const CANVAS_W = 600;
-const CANVAS_H = 400;
+// The canvas is 500x333 rather than 600x400: at the default 316x221 window the
+// smaller canvas lands on --ui 0.56, which keeps the 20px name row at ~11.2px
+// and the 16px measurements at ~9px on screen instead of the ~9.4/7.5px the
+// bigger canvas produced.
+const CANVAS_W = 500;
+const CANVAS_H = 333;
 
 function uiScale() {
   return Number(getComputedStyle(document.documentElement).getPropertyValue('--ui')) || 1;
@@ -1152,21 +1156,29 @@ function modelRowNode(row, group) {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }
   });
 
-  const name = create('span', 'col-model');
-  name.append(create('i', `status-dot ${row.status === 'error' ? 'bad' : row.status === 'live' ? 'accent' : 'good'}`));
-  name.append(create('b', 'model-name', row.model));
-  if (row.reroutes > 0) name.append(create('i', 'row-reroute mono', `改道 ${row.reroutes} 次`));
+  // Two reading tiers. The card is a 500x333 canvas scaled to the window
+  // (~0.56 at the default size), so canvas type much below 20px arrives on
+  // screen too small to read. The model name carries the row on its own line
+  // at 20px with the state word at its right edge, and the measurements sit
+  // underneath at 16px where they still read.
+  const main = create('span', 'row-main');
+  main.append(create('i', `status-dot ${row.status === 'error' ? 'bad' : row.status === 'live' ? 'accent' : 'good'}`));
+  main.append(create('b', 'model-name', row.model));
+  main.append(create('span', 'state-word', STATE_WORDS[row.status] || '完成'));
 
   // 耗时拆解 still means what it always did: show the measured timing, or a
-  // dash when magpie did not report one.
+  // dash when magpie did not report one. The row prints the ascii duration
+  // ("3.0s"): a Chinese unit inside this mono line smears at the card's scale,
+  // while the request detail window, unscaled, keeps the Chinese form.
   const timing = settings.showTiming !== false;
-  node.append(
-    name,
-    create('span', 'col-ms mono', timing ? formatDuration(row.ms) : '—'),
+  const metrics = create('span', 'row-metrics');
+  if (row.reroutes > 0) metrics.append(create('i', 'row-reroute', `改道 ${row.reroutes} 次`));
+  metrics.append(
+    create('span', 'col-ms mono', timing ? formatDurationShort(row.ms) : '—'),
     create('span', 'col-ttft mono', timing ? formatLatency(row.ttft) : '—'),
     create('span', 'col-speed mono', timing && row.speed !== null ? `${Math.round(row.speed)} tok/s` : '—'),
-    create('span', 'state-word', STATE_WORDS[row.status] || '完成'),
   );
+  node.append(main, metrics);
   const tip = rowTip(row);
   if (tip) node.title = tip;
   return node;
