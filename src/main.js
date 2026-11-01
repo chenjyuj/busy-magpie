@@ -25,17 +25,25 @@ if (IS_PREVIEW) {
   app.setPath('userData', path.resolve(process.env.BUSY_MAGPIE_PREVIEW_DIR || path.join(app.getPath('appData'), 'Busy Magpie Preview')));
 }
 
-const WIDTH = 632;
-const HEIGHT = 432;
+const WIDTH = 316;
+const HEIGHT = 221;   // (316 - 32) / 1.5 + 32: the canvas ratio, so the card has no band.
 const DETAIL_WIDTH = 420;
 const DETAIL_HEIGHT = 520;
-const COMPACT_WIDTH = 360;
-const COMPACT_HEIGHT = 112;
+const COMPACT_WIDTH = 180;
+const COMPACT_HEIGHT = 56;
 // The card is drawn on a 600×400 canvas inside 16px of padding. Keeping the
 // window at that shape is what lets the canvas scale up to fill it instead of
 // leaving dark bands above and below.
 const CARD_RATIO = 600 / 400;
 const CARD_PAD = 32;
+// The card got half as big, so the range it may be resized within did too.
+const MIN_WIDTH = 300;
+const MIN_HEIGHT = 216;
+const MAX_WIDTH = 1600;
+const MAX_HEIGHT = 1200;
+// A size stored by the older, twice-as-big card is halved once (see
+// loadSettings) instead of pinning the widget at the old dimensions.
+const SIZE_EPOCH = 2;
 
 function heightForWidth(width) {
   return Math.round((width - CARD_PAD) / CARD_RATIO) + CARD_PAD;
@@ -193,15 +201,15 @@ function normalizeUpdateMode(value) {
 // A stored size is snapped back to the card's shape, within the allowed
 // range, so a window saved before the shape was enforced still fits.
 function normalizeSize(width) {
-  let w = Math.max(600, Math.min(1600, Number(width) || WIDTH));
+  let w = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Number(width) || WIDTH));
   let h = heightForWidth(w);
-  if (h > 1200) {
-    h = 1200;
-    w = Math.max(600, Math.min(1600, widthForHeight(h)));
+  if (h > MAX_HEIGHT) {
+    h = MAX_HEIGHT;
+    w = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, widthForHeight(h)));
   }
-  if (h < 432) {
-    h = 432;
-    w = Math.max(600, Math.min(1600, widthForHeight(h)));
+  if (h < MIN_HEIGHT) {
+    h = MIN_HEIGHT;
+    w = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, widthForHeight(h)));
   }
   return { width: w, height: h };
 }
@@ -212,12 +220,19 @@ function loadSettings() {
     const parsed = JSON.parse(raw);
     const enabledPeriods = normalizePeriods(parsed.enabledPeriods);
     const usagePeriod = normalizePeriod(parsed.usagePeriod);
-    const size = normalizeSize(parsed.width);
+    // A profile written by the twice-as-big card carries its old size: halve it
+    // once, then snap it into the new range. Later launches keep what the user
+    // resized to. (An absent epoch is the oldest profile: Number(undefined) is
+    // NaN and every NaN comparison is false, so default it explicitly.)
+    const epoch = Number(parsed.sizeEpoch) || 1;
+    const legacySize = epoch < SIZE_EPOCH && Number(parsed.width) > 0;
+    const size = normalizeSize(legacySize ? Math.round(Number(parsed.width) / 2) : parsed.width);
     return {
       ...defaults(),
       ...parsed,
       width: size.width,
       height: size.height,
+      sizeEpoch: SIZE_EPOCH,
       usagePeriod: enabledPeriods.includes(usagePeriod) ? usagePeriod : enabledPeriods[0],
       enabledPeriods,
       pillMetric: normalizeMetric(parsed.pillMetric),
@@ -324,12 +339,12 @@ function clampBounds(x, y, width = WIDTH, height = HEIGHT) {
 function createWindow() {
   nativeTheme.themeSource = 'dark';
   const area = screen.getPrimaryDisplay().workArea;
-  let width = Math.max(600, Math.min(settings.width || WIDTH, area.width - 20));
+  let width = Math.max(MIN_WIDTH, Math.min(settings.width || WIDTH, area.width - 20));
   let height = heightForWidth(width);
-  const maxHeight = Math.min(area.height - 20, 1200);
+  const maxHeight = Math.min(area.height - 20, MAX_HEIGHT);
   if (height > maxHeight) {
-    height = Math.max(432, maxHeight);
-    width = Math.max(600, Math.min(area.width - 20, widthForHeight(height)));
+    height = Math.max(MIN_HEIGHT, maxHeight);
+    width = Math.max(MIN_WIDTH, Math.min(area.width - 20, widthForHeight(height)));
     height = heightForWidth(width);
   }
   settings.width = width;
@@ -1276,7 +1291,7 @@ function endResize() {
     // settings.height is always the card's height, pane excluded, so this
     // holds whether or not the drawer is open — and whether it closed in
     // the middle of the drag.
-    const cardHeight = Math.max(432, Number(settings.height) || bounds.height);
+    const cardHeight = Math.max(MIN_HEIGHT, Number(settings.height) || bounds.height);
     frame = { ...frame, cardHeight: cardHeight - 32, windowHeight: bounds.height };
     send('magpie:frame', frame);
     send('magpie:resize', false);
@@ -1838,11 +1853,11 @@ ipcMain.handle('settings:save', (_event, input) => {
       x: settings.left ?? 0,
       y: settings.top ?? 0,
     }).workArea;
-    let width = Math.max(600, Math.min(area.width - 20, Number(data.width) || settings.width || WIDTH));
+    let width = Math.max(MIN_WIDTH, Math.min(area.width - 20, Number(data.width) || settings.width || WIDTH));
     let height = heightForWidth(width);
-    if (height > Math.min(area.height - 20, 1200)) {
-      height = Math.max(432, Math.min(area.height - 20, 1200));
-      width = Math.max(600, Math.min(area.width - 20, widthForHeight(height)));
+    if (height > Math.min(area.height - 20, MAX_HEIGHT)) {
+      height = Math.max(MIN_HEIGHT, Math.min(area.height - 20, MAX_HEIGHT));
+      width = Math.max(MIN_WIDTH, Math.min(area.width - 20, widthForHeight(height)));
       height = heightForWidth(width);
     }
     const rawGateway = String(data.gateway ?? '').trim();

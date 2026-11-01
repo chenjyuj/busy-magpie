@@ -3284,7 +3284,9 @@ body.native-material .card {
   background: rgba(0, 0, 0, 0.3);
 }
 
-/* The list itself. */
+/* The list itself: the content already sits on the scaled canvas (the row
+   heights it measures come back already scaled), so only the grid needs
+   adjusting here. */
 .content {
   grid-template-rows: 30px 10px 1fr 6px 16px;
 }
@@ -3302,7 +3304,26 @@ body.native-material .card {
   flex-direction: column;
   gap: 10px;
   min-height: 0;
+  /* Every group is drawn now, so this is the scroll area: the wheel must reach
+     it, which means opting back into pointer events on a card that is
+     otherwise click-through. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  pointer-events: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
 }
+
+.provider-groups::-webkit-scrollbar { width: 6px; }
+.provider-groups::-webkit-scrollbar-track { background: transparent; }
+
+.provider-groups::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.provider-groups::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.32); }
 
 .provider-group {
   display: flex;

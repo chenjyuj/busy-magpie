@@ -41,7 +41,7 @@ let usageData = null;
 let usageStatus = { loading: false, stale: false, at: 0, error: '' };
 let connection = { online: false, detail: '正在连接' };
 let layout = false;
-let frame = { cardHeight: 400, windowHeight: 432 };
+let frame = { cardHeight: 400, windowHeight: 216 };
 
 const numberAnimations = new WeakMap();
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -83,7 +83,7 @@ function applyUiScale() {
   const area = el.stageArea?.getBoundingClientRect();
   if (!area || area.width < 40 || area.height < 40) return;
   const scale = Math.max(
-    0.5,
+    0.3,
     Math.min(2.6, Math.min(area.width / CANVAS_W, area.height / CANVAS_H)),
   );
   document.documentElement.style.setProperty('--ui', scale.toFixed(4));
@@ -499,6 +499,71 @@ function setupDragBar(bar = $('dragBar')) {
   window.busy.onGrab?.((value) => {
     document.body.classList.toggle('can-grab', Boolean(value));
   });
+}
+
+// Press anywhere on the card and move to drag it. A press that never moves is
+// left completely alone, so a click still opens a row's request list, cycles
+// the token pill or works a button; a press that moves even a few pixels is a
+// drag, and the click it would have produced is swallowed.
+const DRAG_THRESHOLD = 4;
+
+function setupCardDrag() {
+  const card = $('card');
+  if (!card || !window.busy?.dragStart) return;
+  let press = null;
+  let dragging = false;
+  let suppressClick = false;
+
+  const releaseMovers = () => {
+    window.removeEventListener('pointermove', onMove, true);
+    window.removeEventListener('pointerup', finish, true);
+    window.removeEventListener('pointercancel', finish, true);
+  };
+
+  const finish = () => {
+    if (!press && !dragging) return;
+    const wasDragging = dragging;
+    press = null;
+    dragging = false;
+    releaseMovers();
+    card.classList.remove('is-dragging');
+    if (wasDragging) {
+      window.busy.dragEnd();
+      window.setTimeout(() => { suppressClick = false; }, 420);
+    }
+  };
+
+  const onMove = (event) => {
+    if (!press || dragging) return;
+    if (Math.hypot(event.clientX - press.x, event.clientY - press.y) <= DRAG_THRESHOLD) return;
+    dragging = true;
+    suppressClick = true;
+    card.classList.add('is-dragging');
+    // Capture only once the press has become a drag: capturing at the start
+    // would redirect the click that follows a plain press, and a row's click
+    // would never reach it.
+    try { card.setPointerCapture(press.id); } catch { /* the release may land outside the window */ }
+    window.busy.dragStart();
+  };
+
+  card.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || dragging) return;
+    // The top strip keeps its long-press gesture; panes, the menu and the
+    // resize corners are not drag surfaces of their own.
+    if (event.target.closest('#dragBar, #compactDragBar, .resize-handle, .settings-pane, .about-view, .quick-menu')) return;
+    // Listen on the window rather than the card: the press leaves the card as
+    // soon as the drag starts, and the threshold has to be crossed before that.
+    press = { x: event.clientX, y: event.clientY, id: event.pointerId };
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', finish, true);
+    window.addEventListener('pointercancel', finish, true);
+  });
+
+  card.addEventListener('click', (event) => {
+    if (!suppressClick) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, true);
 }
 
 function setupResizeHandles() {
@@ -986,7 +1051,8 @@ function applyGateway() {
 // provider carried. A live request only flips the status — the row keeps the
 // numbers of the last request that finished.
 
-const ROW_LIMIT = 6;
+// Every provider group is drawn; the list scrolls instead of hiding rows
+// behind a "+N more" summary.
 let rowsShown = 0;
 
 const routeActive = route => Boolean(route) && (!route.done || (route.tries || []).some(item => !item.done));
@@ -1114,7 +1180,7 @@ function render() {
   const online = Boolean(connection.online && lastTrace);
   if (online) {
     document.body.classList.remove('stale');
-    const { groups, hiddenCount } = providerSessionGroups(routes, { limit: ROW_LIMIT });
+    const { groups, hiddenCount } = providerSessionGroups(routes, { limit: Number.POSITIVE_INFINITY });
     renderProviderGroups(groups, hiddenCount);
   } else {
     // A dropped gateway keeps the last frame on screen and labels it stale
@@ -1196,6 +1262,7 @@ async function boot() {
   reducedMotion.addEventListener('change', render);
   setupDragBar();
   setupDragBar($('compactDragBar'));
+  setupCardDrag();
   setupResizeHandles();
   setupSettingsPanel();
   setupAbout();
