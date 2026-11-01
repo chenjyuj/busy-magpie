@@ -1,5 +1,9 @@
 :root {
-  --ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+  /* --ui is the card's fit scale, written by applyUiScale (see app.js). It is
+     not a font: the type stack below used to share this name and got replaced
+     by the number, so keep the two apart. */
+  --ui: 1;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
     "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", sans-serif;
   --mono: "SF Mono", "Cascadia Mono", "Cascadia Code", "Menlo", "Consolas",
     "Microsoft YaHei UI", monospace;
@@ -29,7 +33,7 @@ body {
   overflow: hidden;
   background: transparent;
   color: var(--ink);
-  font-family: var(--ui);
+  font-family: var(--sans);
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -431,8 +435,11 @@ body.native-material .node { background-color: rgb(12 16 25 / 0.32); }
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 500px;
-  height: 333px;
+  /* The card is laid out on this canvas and scaled to the window. The font
+     setting shrinks the canvas (a smaller canvas means a bigger --ui), so the
+     same 20px name reads bigger without the window changing. */
+  width: var(--canvas-w, 500px);
+  height: var(--canvas-h, 333px);
   transform: translate(-50%, -50%) scale(var(--ui, 1));
   transform-origin: center center;
   pointer-events: none;
@@ -2447,15 +2454,27 @@ body.settings-open .stage-canvas > :not(.settings-pane) { visibility: hidden; }
     rgb(16 16 23 / var(--panel-alpha, 0.12));
 }
 
+/* The font tier shrinks the card canvas, and this form is already fitted to a
+   whole 500x333 one without scrolling. So the inner sheet is laid out at that
+   size and undo-scaled by the tier (500/zoom CSS px wide, which the canvas
+   scale then maps back onto the window): the panel reads at the same on-screen
+   size whatever the setting, because it is chrome, not card content. */
 .settings-inner {
   display: flex;
-  flex: 1 1 auto;
+  /* The sheet is laid out at the design canvas size, never at the pane's; the
+     transform below maps it back onto the pane. flex:none keeps the flex pane
+     from shrinking it to the pane and clipping the form. */
+  flex: none;
   flex-direction: column;
+  width: 500px;
+  height: 333px;
   min-height: 0;
   padding: 18px 20px 16px;
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  transform: scale(calc(1 / var(--font-zoom, 1)));
+  transform-origin: left top;
 }
 
 .settings-pane[data-panel="settings"] .settings-inner {
@@ -2539,6 +2558,26 @@ body.settings-open .stage-canvas > :not(.settings-pane) { visibility: hidden; }
 }
 
 .settings-x:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* The window reset sits in the head with the close button: it is about where
+   the card lives, not about any one settings page. */
+.settings-reset {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.settings-reset:hover {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.08);
 }
@@ -2632,11 +2671,32 @@ body.settings-open .stage-canvas > :not(.settings-pane) { visibility: hidden; }
   background: rgba(255, 255, 255, 0.025);
 }
 
-/* Two switches on one line, to keep the whole form inside the card. */
+/* Two switches on one line, to keep the whole form inside the card. Each
+   toggle sits right after its own label: a trailing box at the column edge
+   reads as the neighbour's, which made 总在最前 look paired with 隐藏账号名称. */
 .settings-duo {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0 14px;
+}
+
+.settings-duo .settings-switch {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+/* A caption with its chips underneath, for two settings sharing one line: the
+   sentence stays with its own control instead of drifting across the row. */
+.settings-stack {
+  min-width: 0;
+}
+
+.settings-stack .settings-caption {
+  margin-bottom: 4px;
+}
+
+.settings-stack .settings-chips {
+  justify-content: flex-start;
 }
 
 .settings-group h3 {
@@ -2746,11 +2806,47 @@ body.settings-open .stage-canvas > :not(.settings-pane) { visibility: hidden; }
   font-weight: 600;
 }
 
+/* The checkbox is drawn here rather than by the OS: the card is light, and a
+   native box on Windows follows the desktop's dark theme, so the unticked
+   state arrived as a black square. */
 .settings-switch input {
-  width: 15px;
-  height: 15px;
-  accent-color: var(--accent);
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid #cfcfd6;
+  border-radius: 5px;
+  background: #fff;
   cursor: pointer;
+  appearance: none;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.settings-switch input::after {
+  content: "";
+  width: 8px;
+  height: 4px;
+  margin-top: -2px;
+  border-bottom: 1.8px solid #fff;
+  border-left: 1.8px solid #fff;
+  transform: rotate(-45deg) scale(0);
+  transition: transform 0.12s ease;
+}
+
+.settings-switch input:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.settings-switch input:checked::after {
+  transform: rotate(-45deg) scale(1);
+}
+
+.settings-switch input:focus-visible {
+  outline: 2px solid rgb(0 122 255 / 0.35);
+  outline-offset: 2px;
 }
 
 .settings-opacity {
@@ -2950,7 +3046,7 @@ body.settings-closing .settings-pane:not([hidden]) {
   border-radius: 999px;
   background: rgba(167, 139, 250, 0.18);
   color: var(--ink);
-  font-family: var(--ui);
+  font-family: var(--sans);
   font-size: 8.5px;
   font-weight: 650;
   line-height: 1;

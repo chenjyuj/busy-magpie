@@ -92,6 +92,7 @@
                 <b>设置 <em class="settings-version mono" id="settingsVersion">v1.4.0</em></b>
               </div>
               <div class="settings-head-actions">
+                <button class="settings-reset" id="settingsResetPosition" type="button" title="恢复默认位置和大小">复位</button>
                 <button class="settings-x" id="settingsClose" type="button" aria-label="关闭设置">×</button>
               </div>
             </header>
@@ -114,10 +115,32 @@
                         <span><b>隐藏账号名称</b></span>
                         <input type="checkbox" id="settingsMask">
                       </label>
+                      <label class="settings-switch"><span><b>紧凑模式</b></span><input type="checkbox" id="settingsCompact"></label>
+                      <label class="settings-switch"><span><b>安静模式</b></span><input type="checkbox" id="settingsQuiet"></label>
                     </div>
-                    <label class="settings-switch"><span><b>紧凑模式</b></span><input type="checkbox" id="settingsCompact"></label>
-                    <label class="settings-switch"><span><b>安静模式</b></span><input type="checkbox" id="settingsQuiet"></label>
-                    <div class="gateway-actions"><button type="button" id="settingsResetPosition">恢复默认位置和大小</button></div>
+                  </section>
+
+                  <section class="settings-group">
+                    <div class="settings-duo">
+                      <div class="settings-stack">
+                        <div class="settings-caption"><b>字号</b></div>
+                        <div class="settings-chips" id="settingsFontSizes" role="group" aria-label="字号">
+                          <button type="button" class="settings-chip" data-font="small" aria-pressed="false">小</button>
+                          <button type="button" class="settings-chip" data-font="normal" aria-pressed="true">标准</button>
+                          <button type="button" class="settings-chip" data-font="large" aria-pressed="false">大</button>
+                          <button type="button" class="settings-chip" data-font="xlarge" aria-pressed="false">特大</button>
+                        </div>
+                      </div>
+                      <div class="settings-stack">
+                        <div class="settings-caption"><b>卡片大小</b></div>
+                        <div class="settings-chips" id="settingsCardSizes" role="group" aria-label="卡片大小">
+                          <button type="button" class="settings-chip" data-card="small" aria-pressed="false">小</button>
+                          <button type="button" class="settings-chip" data-card="normal" aria-pressed="true">标准</button>
+                          <button type="button" class="settings-chip" data-card="large" aria-pressed="false">大</button>
+                          <button type="button" class="settings-chip" data-card="xlarge" aria-pressed="false">特大</button>
+                        </div>
+                      </div>
+                    </div>
                   </section>
 
                   <section class="settings-group">

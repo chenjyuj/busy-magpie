@@ -27,17 +27,35 @@ function panelHarness() {
     }
     return elements.get(id);
   };
-  // The save path reads the chip groups; give it one chip each so it can.
+  // The save path reads the chip groups; give it one chip each so it can. A
+  // chip remembers the pressed state the panel writes and replays a click the
+  // way the browser would, so a test can press a tier the way a user does.
   const chip = (dataset) => ({
     dataset,
-    getAttribute: (name) => (name === 'aria-pressed' ? 'true' : null),
-    setAttribute() {},
-    addEventListener() {},
+    pressed: true,
+    handlers: {},
+    getAttribute(name) { return name === 'aria-pressed' ? String(this.pressed) : null; },
+    setAttribute(name, value) { if (name === 'aria-pressed') this.pressed = value === 'true'; },
+    addEventListener(name, handler) { this.handlers[name] = handler; },
+    click() { this.handlers.click?.(); },
   });
+  const groups = {
+    settingsUpdate: [chip({ update: 'idle' })],
+    settingsPeriods: [chip({ period: 'today' })],
+    settingsMetrics: [chip({ metric: 'total' })],
+    settingsFontSizes: [
+      chip({ font: 'small' }), chip({ font: 'normal' }),
+      chip({ font: 'large' }), chip({ font: 'xlarge' }),
+    ],
+    settingsCardSizes: [
+      chip({ card: 'small' }), chip({ card: 'normal' }),
+      chip({ card: 'large' }), chip({ card: 'xlarge' }),
+    ],
+  };
   const querySelectorAll = (selector) => {
-    if (selector.includes('settingsUpdate')) return [chip({ update: 'idle' })];
-    if (selector.includes('settingsPeriods')) return [chip({ period: 'today' })];
-    if (selector.includes('settingsMetrics')) return [chip({ metric: 'total' })];
+    for (const [name, chips] of Object.entries(groups)) {
+      if (selector.includes(name)) return chips;
+    }
     return [];
   };
   const context = {
@@ -52,7 +70,7 @@ function panelHarness() {
       clearTimeout() {}, setTimeout() {}, addEventListener() {},
       busy: {
         settingsGet: () => new Promise((resolve) => loads.push(resolve)),
-        settingsSave: (payload) => { saves.push(payload); return Promise.resolve({ ok: true, version: 'test', settings: {}, path: '' }); },
+        settingsSave: (payload) => { saves.push(payload); return Promise.resolve({ ok: true, version: 'test', settings: { ...payload }, path: '' }); },
         onSettingsPanel(handler) { onPanel = handler; },
       },
     },
@@ -60,7 +78,7 @@ function panelHarness() {
   vm.createContext(context);
   vm.runInContext(`${setup}\nsetupSettingsPanel();`, context);
   return {
-    element, saves,
+    element, saves, groups,
     open() { onPanel({ open: true, mode: 'settings' }); },
     close() { onPanel({ open: false }); },
     async resolveLoad(index, values = {}) {
@@ -92,4 +110,42 @@ test('saving the settings sends no opacity, which the opaque card no longer has'
   assert.equal(h.saves.length, 1);
   assert.equal(Object.hasOwn(h.saves[0], 'opacity'), false);
   assert.equal(h.saves[0].gateway, '127.0.0.1:3500');
+});
+
+test('the font tier travels with the save and an untouched card chip sends no width', async () => {
+  const h = panelHarness();
+  h.open();
+  await h.resolveLoad(0, { width: 316, fontSize: 'normal' });
+  h.groups.settingsFontSizes[2].click();
+  h.element('settingsForm').handlers.submit({ preventDefault() {} });
+  await flush();
+  await flush();
+  assert.equal(h.saves.length, 1);
+  assert.equal(h.saves[0].fontSize, 'large');
+  // The window was never re-tiered by hand, so the save leaves its width alone
+  // instead of snapping a hand-dragged size to the nearest preset.
+  assert.equal(Object.hasOwn(h.saves[0], 'width'), false);
+});
+
+test('pressing a card size chip sends that width and the chip then describes the window', async () => {
+  const h = panelHarness();
+  h.open();
+  await h.resolveLoad(0, { width: 316, fontSize: 'normal' });
+  h.groups.settingsCardSizes[3].click();
+  h.element('settingsForm').handlers.submit({ preventDefault() {} });
+  await flush();
+  await flush();
+  assert.equal(h.saves[0].width, 460);
+  // The panel refills from the save reply, so the chip now describes the window
+  // the save produced (the 460 it just sent), not the size the panel opened at.
+  const tiers = h.groups.settingsCardSizes;
+  assert.equal(tiers[3].pressed, true);
+});
+
+test('the panel shows the tier nearest the live window rather than a fixed one', async () => {
+  const h = panelHarness();
+  h.open();
+  await h.resolveLoad(0, { width: 300, fontSize: 'xlarge' });
+  assert.equal(h.groups.settingsCardSizes[0].pressed, true);
+  assert.equal(h.groups.settingsFontSizes[3].pressed, true);
 });

@@ -35,6 +35,7 @@ let settings = {
   pillMetric: 'total',
   rollTokens: true,
   showTiming: true,
+  fontSize: 'normal',
 };
 let lastTrace = null;
 let usageData = null;
@@ -79,6 +80,16 @@ function applyFrame(next) {
 const CANVAS_W = 500;
 const CANVAS_H = 333;
 
+// The font setting is a content zoom rather than a pile of font-size rules:
+// the canvas shrinks by this factor, the window does not, so the same 20px
+// name lands bigger on screen (and every row, gap and icon with it). `small`
+// keeps the name near 10px, `xlarge` lifts it to ~15px.
+const FONT_ZOOM = { small: 0.88, normal: 1, large: 1.16, xlarge: 1.34 };
+
+function fontZoom() {
+  return FONT_ZOOM[settings.fontSize] || 1;
+}
+
 function uiScale() {
   return Number(getComputedStyle(document.documentElement).getPropertyValue('--ui')) || 1;
 }
@@ -86,9 +97,16 @@ function uiScale() {
 function applyUiScale() {
   const area = el.stageArea?.getBoundingClientRect();
   if (!area || area.width < 40 || area.height < 40) return;
+  const zoom = fontZoom();
+  const canvasW = CANVAS_W / zoom;
+  const canvasH = CANVAS_H / zoom;
+  const root = document.documentElement;
+  root.style.setProperty('--canvas-w', `${canvasW.toFixed(2)}px`);
+  root.style.setProperty('--canvas-h', `${canvasH.toFixed(2)}px`);
+  root.style.setProperty('--font-zoom', String(zoom));
   const scale = Math.max(
     0.3,
-    Math.min(2.6, Math.min(area.width / CANVAS_W, area.height / CANVAS_H)),
+    Math.min(2.6, Math.min(area.width / canvasW, area.height / canvasH)),
   );
   document.documentElement.style.setProperty('--ui', scale.toFixed(4));
   requestAnimationFrame(reportHitAreas);
@@ -629,6 +647,8 @@ function setupSettingsPanel() {
   const gateway = $('settingsGateway');
   const periodChips = [...document.querySelectorAll('#settingsPeriods .settings-chip')];
   const metricChips = [...document.querySelectorAll('#settingsMetrics .settings-chip')];
+  const fontChips = [...document.querySelectorAll('#settingsFontSizes .settings-chip')];
+  const cardChips = [...document.querySelectorAll('#settingsCardSizes .settings-chip')];
   const roll = $('settingsRoll');
   const timing = $('settingsTiming');
   const keepAlive = $('settingsKeepAlive');
@@ -642,6 +662,31 @@ function setupSettingsPanel() {
   let closeTimer = 0;
   let loadGeneration = 0;
   let gatewayReport = '';
+  // Only a chip the user actually pressed resizes the window: leaving the chip
+  // on today's nearest preset must not snap a hand-dragged window.
+  let cardSizeTouched = false;
+  // The widths the 卡片大小 chips offer. Main keeps the card's shape, so only the
+  // width is sent and the height follows from heightForWidth on that side. The
+  // small tier is the smallest window main will keep at that shape (300 wide is
+  // only 211 high, under the 216 floor, so it would come back as 308×216): the
+  // chip promises the window the user actually gets.
+  const CARD_PRESETS = { small: 308, normal: 316, large: 380, xlarge: 460 };
+
+  // Which preset today's window is nearest, so the chip describes a window the
+  // user resized by hand instead of claiming a tier it never had.
+  const cardPreset = (width) => {
+    const current = Number(width) || CARD_PRESETS.normal;
+    let best = 'normal';
+    let bestDelta = Infinity;
+    for (const [name, presetWidth] of Object.entries(CARD_PRESETS)) {
+      const delta = Math.abs(current - presetWidth);
+      if (delta < bestDelta) {
+        best = name;
+        bestDelta = delta;
+      }
+    }
+    return best;
+  };
 
   const setStatus = (text, error = false) => {
     status.textContent = text || '';
@@ -651,7 +696,8 @@ function setupSettingsPanel() {
   const pressChips = (chips, active) => {
     for (const chip of chips) {
       const key = chip.dataset.period || chip.dataset.metric
-        || chip.dataset.update || chip.dataset.effect;
+        || chip.dataset.update || chip.dataset.effect
+        || chip.dataset.font || chip.dataset.card;
       chip.setAttribute('aria-pressed', active.has(key) ? 'true' : 'false');
     }
   };
@@ -706,6 +752,23 @@ function setupSettingsPanel() {
     });
   }
 
+  for (const chip of fontChips) {
+    chip.addEventListener('click', () => {
+      for (const other of fontChips) {
+        other.setAttribute('aria-pressed', other === chip ? 'true' : 'false');
+      }
+    });
+  }
+
+  for (const chip of cardChips) {
+    chip.addEventListener('click', () => {
+      cardSizeTouched = true;
+      for (const other of cardChips) {
+        other.setAttribute('aria-pressed', other === chip ? 'true' : 'false');
+      }
+    });
+  }
+
   const fill = (data) => {
     const s = data.settings || {};
     topmost.checked = Boolean(s.topmost);
@@ -715,6 +778,9 @@ function setupSettingsPanel() {
       Array.isArray(s.enabledPeriods) && s.enabledPeriods.length ? s.enabledPeriods : USAGE_PERIODS,
     ));
     pressChips(metricChips, new Set([String(s.pillMetric || 'total')]));
+    pressChips(fontChips, new Set([String(s.fontSize || 'normal')]));
+    pressChips(cardChips, new Set([cardPreset(s.width)]));
+    cardSizeTouched = false;
     roll.checked = s.rollTokens !== false;
     timing.checked = s.showTiming !== false;
     keepAlive.checked = s.keepAlive !== false;
@@ -782,6 +848,9 @@ function setupSettingsPanel() {
     save.disabled = true;
     setStatus('保存中…');
     try {
+      const cardChip = cardChips.find((chip) => chip.getAttribute('aria-pressed') === 'true')
+        || cardChips.find((chip) => chip.dataset.card === 'normal')
+        || cardChips[0];
       const result = await window.busy.settingsSave({
         topmost: topmost.checked,
         maskAccounts: mask.checked,
@@ -799,6 +868,11 @@ function setupSettingsPanel() {
         keepAlive: keepAlive.checked,
         compact: $('settingsCompact').checked,
         quietMotion: $('settingsQuiet').checked,
+        fontSize: (fontChips.find((chip) => chip.getAttribute('aria-pressed') === 'true')
+          || fontChips.find((chip) => chip.dataset.font === 'normal')
+          || fontChips[0]).dataset.font,
+        // Only a touched chip resizes: null leaves the width main has.
+        ...(cardSizeTouched ? { width: CARD_PRESETS[cardChip.dataset.card] } : {}),
       });
       if (!result?.ok) {
         setStatus(result?.error || '保存失败', true);
@@ -1226,10 +1300,12 @@ function setLayout(on) {
 }
 
 function applySettings(next) {
+  const previousFont = settings.fontSize;
   settings = { ...settings, ...(next || {}) };
   document.body.classList.toggle('noanim', Boolean(settings.quietMotion));
   applyGateway();
   render();
+  if (settings.fontSize !== previousFont) requestAnimationFrame(applyUiScale);
 }
 
 async function boot() {

@@ -162,6 +162,7 @@ function defaults() {
     compact: false,
     quietMotion: false,
     autostart: false,
+    fontSize: 'normal',
   };
 }
 
@@ -187,6 +188,16 @@ function normalizePeriods(value) {
 function normalizeMetric(value) {
   const metric = String(value || '').toLowerCase();
   return PILL_METRICS.includes(metric) ? metric : 'total';
+}
+
+// How big the card's type reads. The web side turns each name into a canvas
+// zoom (a bigger tier means a smaller canvas, so the same 20px name lands
+// bigger on screen) and the content is redrawn inside the unchanged window.
+const FONT_SIZES = ['small', 'normal', 'large', 'xlarge'];
+
+function normalizeFontSize(value) {
+  const size = String(value || '').toLowerCase();
+  return FONT_SIZES.includes(size) ? size : 'normal';
 }
 
 // How the desktop app takes a newer release: on idle, only after the user
@@ -240,6 +251,7 @@ function loadSettings() {
       showTiming: parsed.showTiming !== false,
       keepAlive: parsed.keepAlive !== false,
       autostart: parsed.autostart === true,
+      fontSize: normalizeFontSize(parsed.fontSize),
       // An old install only had the on/off check: it means `never'' now.
       updateMode: normalizeUpdateMode(parsed.updateMode ?? (parsed.checkUpdates === false ? 'never' : 'idle')),
       checkUpdates: normalizeUpdateMode(parsed.updateMode ?? (parsed.checkUpdates === false ? 'never' : 'idle')) !== 'never',
@@ -482,6 +494,7 @@ function publicSettings() {
     showTiming: settings.showTiming !== false,
     compact: Boolean(settings.compact),
     quietMotion: Boolean(settings.quietMotion),
+    fontSize: normalizeFontSize(settings.fontSize),
   };
 }
 
@@ -1199,8 +1212,8 @@ function startResize(direction = 'se') {
     y: bounds.y,
     width: bounds.width,
     height: bounds.height,
-    minWidth: 600,
-    minHeight: 432,
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     timer: null,
     max: null,
   };
@@ -1892,6 +1905,9 @@ ipcMain.handle('settings:save', (_event, input) => {
         : Boolean(data.keepAlive),
       compact: data.compact === undefined ? Boolean(settings.compact) : Boolean(data.compact),
       quietMotion: data.quietMotion === undefined ? Boolean(settings.quietMotion) : Boolean(data.quietMotion),
+      fontSize: data.fontSize === undefined
+        ? normalizeFontSize(settings.fontSize)
+        : normalizeFontSize(data.fontSize),
     };
     if (win && !win.isDestroyed()) {
       const bounds = win.getBounds();
