@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('busy', {
   closeDetail: () => ipcRenderer.send('detail:close'),
   detailReady: () => ipcRenderer.send('detail:ready'),
   toggleMenu: () => ipcRenderer.send('busy:menu-toggle'),
+  hideWidget: () => ipcRenderer.send('busy:hide'),
   closeMenu: () => ipcRenderer.send('busy:menu-close'),
   toggleCompact: () => ipcRenderer.send('busy:compact-toggle'),
   menuAction: (action) => ipcRenderer.send('busy:menu-action', action),

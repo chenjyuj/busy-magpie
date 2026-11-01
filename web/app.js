@@ -298,7 +298,7 @@ function reportHitAreas() {
     const box = node.getBoundingClientRect();
     return { x: Math.round(box.left), y: Math.round(box.top), width: Math.round(box.width), height: Math.round(box.height) };
   };
-  const controls = [el.tokenPill, el.appVersion, $('updateChip'), $('quickMenuToggle'), $('compactPill'), $('compactExpand'), $('compactMenu')]
+  const controls = [el.tokenPill, el.appVersion, $('updateChip'), $('cardClose'), $('quickMenuToggle'), $('compactPill'), $('compactExpand'), $('compactMenu')]
     .filter((node) => node && !node.hidden && node.isConnected)
     .map(rectangle)
     // A model row is a button too: main needs its rectangle to treat the
@@ -548,6 +548,9 @@ function setupCardDrag() {
 
   card.addEventListener('pointerdown', (event) => {
     if (event.button !== 0 || dragging) return;
+    // A new press ends any suppression left over from the previous gesture, so
+    // a click that follows a drag (or comes 300ms later) still works.
+    suppressClick = false;
     // The top strip keeps its long-press gesture; panes, the menu and the
     // resize corners are not drag surfaces of their own.
     if (event.target.closest('#dragBar, #compactDragBar, .resize-handle, .settings-pane, .about-view, .quick-menu')) return;
@@ -564,6 +567,14 @@ function setupCardDrag() {
     event.preventDefault();
     event.stopPropagation();
   }, true);
+}
+
+// The card's own close button: it hides the card (the widget's minimise)
+// instead of quitting, so the tray icon can bring it back.
+function setupCardClose() {
+  const button = $('cardClose');
+  if (!button || !window.busy?.hideWidget) return;
+  button.addEventListener('click', () => window.busy.hideWidget());
 }
 
 function setupResizeHandles() {
@@ -1263,6 +1274,7 @@ async function boot() {
   setupDragBar();
   setupDragBar($('compactDragBar'));
   setupCardDrag();
+  setupCardClose();
   setupResizeHandles();
   setupSettingsPanel();
   setupAbout();

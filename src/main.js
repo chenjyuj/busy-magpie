@@ -1989,6 +1989,12 @@ ipcMain.on('busy:about-open', () => {
 });
 
 ipcMain.on('busy:menu-toggle', () => setQuickMenuOpen(!quickMenuOpen));
+// The card's own close button: hiding the window is the widget's minimise,
+// and the "hide" handler below does the rest (menu, settings, detail window).
+ipcMain.on('busy:hide', () => {
+  if (!win || win.isDestroyed() || !win.isVisible()) return;
+  win.hide();
+});
 ipcMain.on('busy:menu-close', () => setQuickMenuOpen(false));
 ipcMain.on('busy:compact-toggle', toggleCompact);
 ipcMain.on('busy:menu-action', (_event, action) => {

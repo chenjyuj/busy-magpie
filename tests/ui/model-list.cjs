@@ -310,6 +310,25 @@ async function run() {
     assert.ok(hitAreas.dragBottom > hitAreas.dragTop, 'the drag strip is reported');
     record('the card keeps blocking clicks and reporting its hit areas');
 
+    // 12. The card's own close button hides the card — the widget's minimise —
+    //     and the card can be shown again.
+    assert.equal(await js('document.querySelector("#cardClose")?.getAttribute("aria-label")'), '关闭卡片');
+    const closeBox = await js(`(()=>{const b=document.querySelector('#cardClose').getBoundingClientRect();
+      return {x:Math.round(b.left), y:Math.round(b.top), width:Math.round(b.width), height:Math.round(b.height)};})()`);
+    assert.ok(hitAreas.controls.some(box => box.x === closeBox.x && box.y === closeBox.y && box.width === closeBox.width),
+      'the close button is reported as a control');
+    const closeSpot = { x: Math.round(closeBox.x + closeBox.width / 2), y: Math.round(closeBox.y + closeBox.height / 2) };
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: closeSpot.x, y: closeSpot.y, button: 'left', clickCount: 1 });
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: closeSpot.x, y: closeSpot.y, button: 'left', clickCount: 1 });
+    await sleep(700);
+    assert.equal(win.isVisible(), false, 'clicking the close button hides the card');
+    assert.equal(BrowserWindow.getAllWindows().length, 1, 'closing the card does not open anything');
+    record('the card close button hides the card instead of quitting');
+    win.showInactive();
+    await sleep(500);
+    assert.equal(win.isVisible(), true, 'the card can be shown again after the close button');
+    record('the card can be shown again after closing');
+
     // 11. A bigger window rescales the card without overflowing it, and compact mode hides the list.
     win.setBounds({ x: 40, y: 40, width: 700, height: 700 });
     await feed([route(1, 'resize-a', { provider: 'p-r1' }), route(2, 'resize-b', { provider: 'p-r2' })]);
