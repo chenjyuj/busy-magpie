@@ -71,7 +71,7 @@ footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line);
 <main>
 <header class="hero">
 <h1>busy-magpie v1.7.0 模型请求明细浮窗 · 浏览器实测报告</h1>
-<p class="meta">生成时间 2026-11-01T00:49:01+08:00 · 生成器 tools/model-report.mjs · 场景 6 个（PASS 6 / FAIL 0）· 内嵌截图 6 张</p>
+<p class="meta">生成时间 2026-11-01T09:26:17+08:00 · 生成器 tools/model-report.mjs · 场景 6 个（PASS 6 / FAIL 0）· 内嵌截图 6 张</p>
 <div class="verdict pass">结论：6 个场景全部通过</div>
 <p class="summary">按设计文档实现「点击模型行 → 独立浮窗逐行列出该 provider 该模型的每一次请求（时间/时长/首字节/tok·s/状态）」后，用真实 Electron 双窗口 + mock magpie 网关实测 5 个场景：首屏 20 条、加载更多、实时置顶追加、进行中/错误/缺首字节三态、位置贴卡片（右侧无空间时翻左 12px）与 Esc 关闭——全部通过；另在本机安装版 1.7.0 上对着**真实 magpie 网关**实拍确认可用（D6）。同期单元测试 227/227、界面回归 detail-window 14/14、model-list 11/11、pointer-input 16/16、drag-bounds 7/7 全绿；glass-composition 因当前会话锁屏（LogonUI 在跑）在改动前后同样 0 PASS，属环境限制。</p>
 <p class="nav">跳转：<a href="#environment">环境与命令</a> · <a href="#scenarios">场景实测</a> · <a href="#raw">原始证据</a></p>
@@ -180,6 +180,11 @@ PASS clicking another model swaps the list in the same window</pre></section>
   tests/ui/drag-bounds.cjs --scale=1 exit=0 PASS=7
 
 harness 改造（commit 6f6e8e6 + 663e7ca）：model-list / pointer-input / drag-bounds / material / resize-handles 的 browser-window-created 回调开头加 `if (win) return;`，使后创建的浮窗不再冒充卡片。改造前后这 3 个回归的 PASS 数完全一致；队友还用对照脚本证明：去掉 guard 后，真浮窗一出现 model-list 即在第 2 项崩溃（TypeError: reading &#39;hasBar&#39;）。glass-composition.cjs 本就不注册该监听（它自己 new fixture 窗口），无需改动。</pre></section>
+<section><h3>回归补丁：真实鼠标点击曾被装饰层吃掉（v1.7.0 交付后由用户发现）</h3><pre>现象：用户报告「点击模型行没有弹窗」。排查：运行中的渲染层确实是新代码（window.busy.openDetail 是函数、行有 role=button/tabIndex=0），但用 CDP Input.dispatchMouseEvent 派发**真实**鼠标事件时窗口数仍为 1——只有 JS 的 element.click() 能开窗。
+  根因：卡片的 #app 是 pointer-events: none（点击穿透设计），只有个别交互元素自己写回 pointer-events: auto（拖动条、token 胶囊、菜单、设置面板）；模型行漏了这条，于是真实点击在命中测试阶段穿过整个列表，落到遗留的 .stage-area 装饰层上（elementFromPoint 在行中心返回 DIV#stageArea）。element.click() 不经过命中测试，所以之前的 UI 回归与浏览器实测都是假绿。
+  修复：.model-row 显式 pointer-events: auto（与其它控件同一套约定）。
+  钉子：tests/ui/detail-window.cjs 新增「a real mouse click on a row opens the detail window」——用 webContents.sendInputEvent 在行中心派发 mouseDown/mouseUp，走 Chromium 真实命中测试；修复前该用例失败（1 !== 2），修复后通过。回归数 14 → 15。
+  本机安装版同步后，用 CDP 真实鼠标事件复验：pages after real click = detail.html + index.html，浮窗显示「商汤小浣熊 · sn-deepseek-v4-1-flash-1017」17 条真实请求。</pre></section>
 <section><h3>环境受限项（改动前后一致，未计入验收）</h3><pre>tests/ui/glass-composition.cjs：当前桌面会话处于锁屏状态（LogonUI 在运行，qwinsta 显示 console/administrator 会话 Active），锁屏时真实桌面窗口不绘制，其 GetPixel 采样超时 → 0 PASS；带/不带 --disable-gpu 都一样，改动前后逐字节相同（历史报告里桌面可用时为 5 PASS）。
   tests/ui/material.cjs、tests/ui/resize-handles.cjs：本机无 GPU 会话下的既有失败，改动前基线同样失败。
   以上三项都不作为本次验收项，但已在用例文档中标注为「环境受限」。</pre></section>

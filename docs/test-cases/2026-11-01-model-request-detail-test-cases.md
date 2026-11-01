@@ -41,6 +41,7 @@
 | PG-D18 | 既有回归不受浮窗影响 | harness 已改造 | 1. 跑三个既有回归 | model-list 11/11、pointer-input 16/16、drag-bounds 7/7 | UI 回归 | `tests/ui/{model-list,pointer-input,drag-bounds}.cjs`；报告「既有回归」条目 |
 | PG-D19 | 文档与报告 | — | 1. 核对 README 小节 2. 打开报告 | README 有「请求明细浮窗」说明；报告 5 场景全过、含截图与命令 | 人工核对 | `README.md`；`docs/reports/2026-11-01-model-request-detail-test-report.html` |
 | PG-D20 | 真实网关可用性 | 本机安装版已同步 1.7.0 | 1. 启动安装版并开 CDP 2. 点模型行 3. 读浮窗标题与行 | 真实网关下同样开窗；标题为该供应商与该模型；逐行给出真实时间/时长/首字节/tok·s/状态 | 浏览器实测（真实网关） | 报告 D6（`docs/reports/screenshots-detail/D6-real-gateway.png`） |
+| PG-D21 | **真实鼠标点击**能打开浮窗（不是只有 JS `.click()`） | 卡片已渲染模型行 | 1. 用 `webContents.sendInputEvent` 在行中心派发 mouseDown/mouseUp（走 Chromium 命中测试） 2. 读窗口数 | 出现第二个窗口（浮窗）。**这条是 v1.7.0 的回归钉子**：卡片的 `#app` 是 `pointer-events: none`，交互元素必须自己写回 `auto`；模型行曾漏写，真实点击会穿过列表落到装饰层上，而 JS 的 `.click()` 绕过命中测试、测不出这个问题 | UI 回归 | `tests/ui/detail-window.cjs`「a real mouse click on a row opens the detail window」 |
 
 ## 覆盖矩阵（对设计文档 §11 验收标准）
 

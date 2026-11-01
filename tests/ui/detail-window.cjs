@@ -115,6 +115,23 @@ async function run() {
     assert.match(row.label || '', /glm-5\.3/, 'the row names the model it opens');
     record('a model row is a focusable button that names its model');
 
+    // A real mouse click goes through Chromium's hit testing, unlike
+    // element.click(): the card's chrome is pointer-transparent, so a row only
+    // receives the press if it opts back in with pointer-events.
+    const box = await cardJs(`(()=>{const r=document.querySelector('.model-row');
+      const b=r.getBoundingClientRect();
+      return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) };})()`);
+    card.webContents.sendInputEvent({ type: 'mouseDown', x: box.x, y: box.y, button: 'left', clickCount: 1 });
+    card.webContents.sendInputEvent({ type: 'mouseUp', x: box.x, y: box.y, button: 'left', clickCount: 1 });
+    await sleep(900);
+    assert.equal(BrowserWindow.getAllWindows().length, 2, 'a real mouse click on a row opens the detail window');
+    assert.ok(detail(), 'the window opened by the real click is the detail window');
+    record('a real mouse click on a row opens the detail window');
+    // Close it again so the rest of the suite starts from the same place.
+    await detailJs('document.getElementById("detailClose").click()');
+    await sleep(500);
+    assert.equal(BrowserWindow.getAllWindows().length, 1);
+
     await cardJs('document.querySelector(".model-row").click()');
     await sleep(300);
     assert.deepEqual(opened, { providerKey: 'officeace', model: 'glm-5.3', providerName: 'OfficeAce' });
