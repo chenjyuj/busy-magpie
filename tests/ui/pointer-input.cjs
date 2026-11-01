@@ -19,7 +19,7 @@ app.disableHardwareAcceleration();
 
 const checks = [], ignoreCalls = [], errors = [];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-let win, back, finished = false, ignored, visible = false, nativeHit;
+let win, back, finished = false, ignored, visible = false, nativeHit, dragStarts = 0;
 let cursor = { x: -10000, y: -10000 };
 const server = http.createServer((request, response) => {
   const url = new URL(request.url, 'http://127.0.0.1');
@@ -35,6 +35,7 @@ const server = http.createServer((request, response) => {
 const js = code => win.webContents.executeJavaScript(code);
 const click = async id => { await js(`document.getElementById(${JSON.stringify(id)}).click()`); await sleep(80); };
 const record = name => { checks.push(name); console.log('PASS', name); };
+ipcMain.on('busy:drag-start', () => { dragStarts += 1; });
 
 function finish(error) {
   if (finished) return;
@@ -158,7 +159,7 @@ async function run() {
     }
     await js('window.busy.toggleCompact()');
     await sleep(100);
-    assert.deepEqual(win.getSize(), [360, 112]);
+    assert.deepEqual(win.getSize(), [180, 56]);
     await blocksClicks('compact panel blocks clicks');
     await click('compactMenu');
     await js('window.busy.closeMenu()');
@@ -166,6 +167,35 @@ async function run() {
     await blocksClicks('closing the compact menu keeps panel clicks blocked');
     await click('compactExpand');
     await blocksClicks('expanding the compact panel keeps panel clicks blocked');
+
+    // A press anywhere on the card that moves drags the window; the click it
+    // would have produced is swallowed, so the panel keeps blocking clicks.
+    const before = win.getBounds();
+    const center = await js(`(()=>{const r=document.getElementById('card').getBoundingClientRect();
+      return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()`);
+    cursor = { x: before.x + center.x, y: before.y + center.y };
+    await sleep(80);
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: center.x, y: center.y, button: 'left', clickCount: 1 });
+    await sleep(80);
+    cursor = { x: before.x + center.x + 10, y: before.y + center.y + 8 };
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: center.x + 10, y: center.y + 8 });
+    const deadline = Date.now() + 1500;
+    while (dragStarts === 0 && Date.now() < deadline) await sleep(20);
+    assert.ok(dragStarts > 0, 'moving the press reaches the production drag handler');
+    await sleep(120);
+    const anchored = win.getBounds();
+    cursor = { x: before.x + center.x + 50, y: before.y + center.y + 36 };
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: center.x + 50, y: center.y + 36 });
+    await sleep(250);
+    const dragged = win.getBounds();
+    assert.ok(Math.abs(dragged.x - anchored.x - 40) <= 2 && Math.abs(dragged.y - anchored.y - 28) <= 2,
+      `the window follows the press (${JSON.stringify(anchored)} -> ${JSON.stringify(dragged)})`);
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: center.x + 50, y: center.y + 36, button: 'left', clickCount: 1 });
+    await sleep(200);
+    assert.deepEqual(win.getBounds(), dragged, 'release stops the drag');
+    assert.equal(BrowserWindow.getAllWindows().length, 1, 'dragging a card does not open another window');
+    await blocksClicks('dragging the card keeps panel clicks blocked');
+
     assert.equal(errors.length, 0, errors.join('\n'));
     finish();
   } catch (error) { finish(error); }

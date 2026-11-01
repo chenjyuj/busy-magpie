@@ -86,6 +86,23 @@ async function release() {
   await sleep(40);
 }
 
+// Press anywhere in the middle of the card and move. The drag starts from the
+// card itself, not from the top strip, so this exercises the new any-position
+// gesture with real input.
+async function pressCardCenter() {
+  const bounds = win.getBounds();
+  const area = await js(`(()=>{const r=document.getElementById('card').getBoundingClientRect();
+    return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()`);
+  const start = { x: bounds.x + area.x, y: bounds.y + area.y };
+  cursor = start;
+  await sleep(80);
+  win.webContents.sendInputEvent({ type: 'mouseDown', x: area.x, y: area.y, button: 'left', clickCount: 1 });
+  await sleep(80);
+  cursor = { x: start.x + 10, y: start.y + 8 };
+  win.webContents.sendInputEvent({ type: 'mouseMove', x: area.x + 10, y: area.y + 8 });
+  return { area, start };
+}
+
 async function repeatedDrags(name, expectedSize, attempts = 12) {
   const repeated = [];
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -142,12 +159,12 @@ async function run() {
 
     // Startup fits the requested size to the runner's logical work area. Keep
     // that accepted size fixed across every gesture, rather than assuming a
-    // 632x432 desktop or reading the rounded native bounds back as the target.
+    // 316x221 desktop or reading the rounded native bounds back as the target.
     layoutSizes.normal = await layoutSize();
     await repeatedDrags('normal', layoutSizes.normal);
     await js('window.busy.toggleCompact()');
     await sleep(120);
-    await repeatedDrags('compact', { width: 360, height: 112 });
+    await repeatedDrags('compact', { width: 180, height: 56 });
     await js('window.busy.toggleCompact()');
     await sleep(120);
 
@@ -202,6 +219,28 @@ async function run() {
     const fitted = layoutSizes.fitted = await layoutSize();
     assert.ok(fitted.width <= 580 && fitted.height <= 400, 'a smaller work area must still fit the card');
     await repeatedDrags('screen fitted', fitted, 3);
+
+    // A press anywhere on the card that moves drags the window; it is a drag
+    // and not a click, so it must not open anything else.
+    const pressBefore = dragCalls;
+    const cardPress = await pressCardCenter();
+    const pressDeadline = Date.now() + 1500;
+    while (dragCalls === pressBefore && Date.now() < pressDeadline) await sleep(20);
+    assert.ok(dragCalls > pressBefore, 'moving a press anywhere on the card reaches the drag handler');
+    await sleep(120);
+    const anchored = sample('card press anchor');
+    cursor = { x: cardPress.start.x + 50, y: cardPress.start.y + 36 };
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: cardPress.area.x + 50, y: cardPress.area.y + 36 });
+    await sleep(250);
+    const moved = sample('card press moved');
+    assert.ok(Math.abs(moved.x - anchored.x - 40) <= 2 && Math.abs(moved.y - anchored.y - 28) <= 2,
+      `the window follows a press anywhere on the card (${JSON.stringify(anchored)} -> ${JSON.stringify(moved)})`);
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: cardPress.area.x + 50, y: cardPress.area.y + 36, button: 'left', clickCount: 1 });
+    await sleep(200);
+    assert.deepEqual(win.getBounds(), moved, 'releasing the card press stops the drag');
+    assert.equal(BrowserWindow.getAllWindows().length, 1, 'a card press drag does not open another window');
+    record('a press that moves anywhere on the card drags the window');
+
     assert.ok(ignoreCalls.length > 0 && ignoreCalls.every(value => value === false),
       'the v1.4.2 panel must never enable click-through');
     assert.equal(rendererErrors.length, 0, rendererErrors.join('\n'));
@@ -213,7 +252,7 @@ async function run() {
 server.listen(0, '127.0.0.1', async () => {
   try {
     fs.writeFileSync(path.join(profile, 'settings.json'), JSON.stringify({
-      gateway: `http://127.0.0.1:${server.address().port}`, width: 632, left: 40, top: 40,
+      gateway: `http://127.0.0.1:${server.address().port}`, width: 316, sizeEpoch: 2, left: 40, top: 40,
       topmost: false, autostart: false, keepAlive: false, updateMode: 'never', quietMotion: true,
     }));
     await app.whenReady();

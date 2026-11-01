@@ -1,8 +1,8 @@
 // The provider-grouped card, checked in a real Electron window against a
 // local mock gateway: one grey head per provider with its allowance bar, one
 // white row per model, live requests keeping the last completed metrics, the
-// row cap, the stale frame after a dropped gateway, the light theme and the
-// panel's click blocking. Runs offscreen so it never disturbs the desktop.
+// scrolling group list, the stale frame after a dropped gateway, the light theme
+// and the panel's click blocking. Runs offscreen so it never disturbs the desktop.
 const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -19,7 +19,7 @@ app.setPath('sessionData', profile);
 app.getVersion = () => JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 app.disableHardwareAcceleration();
 let win, visible = false, ignored = true, cursor = { x: -10000, y: -10000 };
-let hitAreas = null;
+let hitAreas = null, dragStarts = 0;
 const checks = [];
 const errors = [];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -48,9 +48,9 @@ app.on('browser-window-created', (_event, created) => {
   win.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message); });
 });
 ipcMain.on('busy:hit-areas', (_event, data) => { hitAreas = data; });
+ipcMain.on('busy:drag-start', () => { dragStarts += 1; });
 ipcMain.on('busy:ready', () => setTimeout(run, 200));
 async function js(code) { return win.webContents.executeJavaScript(code); }
-const text = selector => js(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`);
 
 // A streamed, completed request: 240 output tokens over 2.4 s -> 100 tok/s.
 const route = (id, served, extra = {}) => {
@@ -196,19 +196,91 @@ async function run() {
     assert.equal(errored.state, '错误');
     record('a failed request reads 错误');
 
-    // 7. More models than the cap keeps the groups whole and counts the rest.
+    // 7. Every model row is drawn; the list scrolls instead of summarising the
+    //    ones that do not fit.
     const many = [];
     for (let index = 1; index <= 8; index += 1) {
       many.push(route(index, `m${index}`, { provider: `p${Math.ceil(index / 3)}`, providerName: `P${Math.ceil(index / 3)}` }));
     }
     await feed(many);
-    const capped = await groups();
-    const shown = capped.reduce((n, group) => n + group.models.length, 0);
-    assert.ok(shown > 0 && shown <= 6, `rows stay within the cap: ${shown}`);
-    assert.equal((await text('#modelHidden')), `+${8 - shown} 个模型`);
-    assert.ok(capped.every(group => group.models.length > 0), 'no group head without a row');
-    fs.writeFileSync(path.join(output, 'capped.png'), (await win.webContents.capturePage()).toPNG());
-    record('the cap keeps model rows, never leaves a group head dangling');
+    const full = await groups();
+    const shown = full.reduce((n, group) => n + group.models.length, 0);
+    assert.equal(shown, many.length, `every row is drawn: ${shown}/${many.length}`);
+    assert.ok(full.every(group => group.models.length > 0), 'no group head without a row');
+    const hidden = await js(`(()=>{const n=document.getElementById('modelHidden');
+      return {hidden:n.hidden,text:n.textContent};})()`);
+    assert.equal(hidden.hidden, true, 'no "+N 个模型" summary is left behind');
+    assert.equal(hidden.text, '');
+    fs.writeFileSync(path.join(output, 'rows.png'), (await win.webContents.capturePage()).toPNG());
+    record('every model row is drawn, with no row-count summary');
+
+    // 7b. More rows than the card can hold: the group list is the scroll area.
+    const long = [];
+    for (let index = 31; index <= 60; index += 1) {
+      long.push(route(index, `m${index}`, { provider: `p${Math.ceil(index / 3)}`, providerName: `P${Math.ceil(index / 3)}` }));
+    }
+    await feed(long);
+    const box = await js(`(()=>{const n=document.getElementById('providerGroups');
+      return {scrollHeight:n.scrollHeight, clientHeight:n.clientHeight,
+        overflow:getComputedStyle(n).overflowY, pointer:getComputedStyle(n).pointerEvents};})()`);
+    assert.equal(box.overflow, 'auto', 'the group list is a scroll container');
+    assert.equal(box.pointer, 'auto', 'the scroll area takes the pointer');
+    assert.ok(box.scrollHeight > box.clientHeight, `the list scrolls: ${box.scrollHeight} > ${box.clientHeight}`);
+    record('the group list scrolls when it holds more than it can show');
+
+    // 7c. The wheel reaches the scroll area even though the card is scaled down,
+    //     and the container really scrolls. This harness runs offscreen, where the
+    //     page is never an active surface: Chromium routes the wheel event to the
+    //     right element but skips its default scroll action (a plain unscaled
+    //     overflow container behaves the same way), so the scaled container is
+    //     proven to scroll by scrolling a deep row into view.
+    try { win.webContents.focus(); } catch { /* offscreen */ }
+    await sleep(150);
+    const scroll = await js(`(()=>{const r=document.getElementById('providerGroups').getBoundingClientRect();
+      return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+Math.min(r.height/2,40))};})()`);
+    await js(`window.__wheel=null;document.addEventListener("wheel",e=>{const n=document.getElementById("providerGroups");
+      window.__wheel={inside:Boolean(n&&(n.contains(e.target)||e.target===n)),
+        target:String(e.target.className||e.target.id||e.target.tagName)};},true)`);
+    for (let n = 0; n < 20 && !(await js('window.__wheel')); n += 1) {
+      win.webContents.sendInputEvent({ type: 'mouseWheel', x: scroll.x, y: scroll.y, deltaX: 0, deltaY: 60, modifiers: 0 });
+      await sleep(60);
+    }
+    const wheel = await js('window.__wheel');
+    assert.ok(wheel && wheel.inside, `the wheel reaches the scroll area (${wheel?.target})`);
+    const scrolled = await js(`(()=>{const n=document.getElementById('providerGroups');
+      n.scrollTop=0; const rows=document.querySelectorAll('.model-row');
+      rows.length && rows[rows.length-1].scrollIntoView({block:'center'}); return n.scrollTop;})()`);
+    assert.ok(scrolled > 0, `the scaled list scrolls (${scrolled})`);
+    record('the wheel reaches the scroll area and the scaled list scrolls');
+
+    // 7d. A press anywhere on the card that moves drags the window; the click it
+    //     would have produced is swallowed, so no row opens a detail window.
+    const before = win.getBounds();
+    const center = await js(`(()=>{const r=document.getElementById('card').getBoundingClientRect();
+      return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()`);
+    cursor = { x: before.x + center.x, y: before.y + center.y };
+    await sleep(80);
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: center.x, y: center.y, button: 'left', clickCount: 1 });
+    await sleep(80);
+    cursor = { x: before.x + center.x + 10, y: before.y + center.y + 8 };
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: center.x + 10, y: center.y + 8 });
+    const dragDeadline = Date.now() + 1500;
+    while (dragStarts === 0 && Date.now() < dragDeadline) await sleep(20);
+    assert.ok(dragStarts > 0, 'moving the press reaches the production drag handler');
+    await sleep(120);
+    const anchored = win.getBounds();
+    cursor = { x: before.x + center.x + 50, y: before.y + center.y + 36 };
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: center.x + 50, y: center.y + 36 });
+    await sleep(250);
+    const dragged = win.getBounds();
+    assert.ok(Math.abs(dragged.x - anchored.x - 40) <= 2 && Math.abs(dragged.y - anchored.y - 28) <= 2,
+      `the window follows the press (${JSON.stringify(anchored)} -> ${JSON.stringify(dragged)})`);
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: center.x + 50, y: center.y + 36, button: 'left', clickCount: 1 });
+    await sleep(200);
+    const settled = win.getBounds();
+    assert.deepEqual(settled, dragged, 'release stops the drag');
+    assert.equal(BrowserWindow.getAllWindows().length, 1, 'dragging a card does not open a detail window');
+    record('a press that moves anywhere on the card drags the window without opening a row');
 
     // 8. The light theme actually reaches the card and its rows.
     const theme = await js(`(()=>{const card=getComputedStyle(document.querySelector('.card'));
@@ -247,7 +319,7 @@ async function run() {
       const last=rows.length?rows.pop().getBoundingClientRect():{bottom:0};
       return { windowH: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--window-h')),
         bottom:last.bottom, limit:list.bottom };})()`);
-    assert.ok(fit.windowH > 432, `the window grew (${fit.windowH})`);
+    assert.ok(fit.windowH > 221, `the window grew (${fit.windowH})`);
     assert.ok(fit.bottom <= fit.limit + 0.5, `rows stay inside the list (${fit.bottom} <= ${fit.limit})`);
     await js('window.busy.toggleCompact()');
     await sleep(320);
