@@ -35,3 +35,5 @@
 - **拖动判定**：`pointerdown` 记录起点，`pointermove` 超过 4px 才调用 `dragStart`；**起手不设指针捕获**（否则 click 会被重定向到 `#card`，行的点击失效），只有判定为拖动后才捕获，并用 `suppressClick` 吞掉拖动后的 click。
 - **滚动**：`.provider-groups` 需要 `pointer-events: auto` 才能收到滚轮/拖动（卡片整体是 `#app` 的 `pointer-events: none`）。
 - **CDP 测不出拖动位移**：CDP 的 `Input.dispatchMouseEvent` 不会移动 Electron 的 `screen.getCursorScreenPoint()`（那是真实光标），所以拖动位移必须用 `sendInputEvent` 的 UI 回归来验证。
+
+> 2026-11-01 晚：画布从 600×400 改为 500×333，`--ui` 从 ≈0.4675 变为 ≈0.56，模型行改为双行（行高 60 画布px），本文 PG-S02 的数值以当时为准；现行布置见 `2026-11-01-card-legibility-test-cases.md`。

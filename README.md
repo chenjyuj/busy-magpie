@@ -14,7 +14,7 @@ A transparent, borderless card that blocks clicks within the panel, reads magpie
 
 ![Busy Magpie 模型会话列表](./docs/screenshots/multi.png)
 
-> 截图为 v1.6.0 界面，使用本地模拟数据，账号已打码。
+> 截图为 v1.8.0 界面，使用本地模拟数据，账号已打码。
 
 ## 为什么是它
 
@@ -62,13 +62,13 @@ setx BUSY_MAGPIE_APP "D:\Apps\Busy Magpie\Busy Magpie.exe"
 
 ![单个模型](./docs/screenshots/single.png)
 
-只有一个模型有请求时，列表只有一行：模型名、状态、时长、首字节和 tok/s。
+只有一个模型有请求时，列表只有一行：第一行是模型名和状态，第二行是时长、首字节和 tok/s。
 
 ### 多个模型
 
 ![多个模型](./docs/screenshots/multi.png)
 
-多个模型各占一行，按最近活动倒序排列，最活跃的在最上面。改道过的行在末尾带「改道 N 次」小字；模型很多时列表内部滚动（滚轮或滚动条）。
+多个模型各占一行，按最近活动倒序排列，最活跃的在最上面。改道过的行在测量行开头带「改道 N 次」的橙色小标；模型很多时列表内部滚动（滚轮或滚动条）。
 
 ### 设置
 
