@@ -54,7 +54,7 @@ setx BUSY_MAGPIE_APP "D:\Apps\Busy Magpie\Busy Magpie.exe"
 
 插件只负责启动桌面层；透明窗口、实时 trace 和所有界面仍然由 Electron 应用提供。magpie 的插件页面运行在沙盒 iframe 里，既拿不到实时 trace，也不能创建跨应用的透明窗口，所以这里采用启动器，而不是页面插件。
 
-安装内置版本为 `v1.5.0`。桌面卡片、设置和托盘显示当前业务版本；业务包更新后，它可以高于运行环境版本。插件列表的版本仍由插件自身的 `package.json` 决定。
+安装内置版本为 `v1.9.0`。桌面卡片、设置和托盘显示当前业务版本；业务包更新后，它可以高于运行环境版本。插件列表的版本仍由插件自身的 `package.json` 决定。
 
 ## 截图
 
@@ -191,7 +191,7 @@ magpie 插件没有卸载生命周期钩子，所以**移除插件不会自动�
 
 ### 紧凑模式
 
-菜单里的「紧凑模式」把窗口收为 `360×112` 的状态条，显示连接状态、活动请求数和当前用量。`↗` 恢复完整列表；点击 `···` 或打开设置时临时展开，关闭后回到原来的紧凑位置。完整视图的尺寸独立保留，紧凑状态不接受边框缩放。
+菜单里的「紧凑模式」把窗口收为 `180×56` 的状态条，显示连接状态、活动请求数和当前用量。`↗` 恢复完整列表；点击 `···` 或打开设置时临时展开，关闭后回到原来的紧凑位置。完整视图的尺寸独立保留，紧凑状态不接受边框缩放。
 
 ### 移动
 
@@ -251,11 +251,11 @@ MAGICREW CN                                          （无额度窗口，不画
 - **缺失就是 `—`**：拿不到时长、首字节或输出速度时显示 `—`，不会用 `0ms` / `0 tok/s` 顶替。
 - 状态三选一，按 `done` 与 `status` 判定：**错误**（红点，请求带错误或 HTTP 4xx / 5xx）、**进行中**（蓝点，请求还没结束）、**完成**（绿点）。
 - **进行中的请求不会清空这一行**：只要同一个模型之前有完成的请求，时长、首字节与 token/s 继续显示上一次的值，只有状态变成「进行中」。
-- 被改道过的行在末尾用小字标「改道 N 次」；`N` 是这条请求尝试过的不同模型数减 1，没改道就不显示。
+- 被改道过的行在耗时列开头用橙色小字标「改道 N 次」；`N` 是这条请求尝试过的不同模型数减 1，没改道就不显示。
 
-### 悬停明细
+### 行悬停与点击
 
-行不可点击，悬停会给出这条请求的更多信息：账号（跟随「隐藏账号名称」打码）· 最近活动时间 · 改道次数 · tok/s 明细（`N token / Xs`，仅在可用时显示）。行内不显示账号；供应商已经在组头上。
+悬停一行会给出这条请求的更多信息：账号（跟随「隐藏账号名称」打码）· 最近活动时间 · 改道次数 · tok/s 明细（`N token / Xs`，仅在可用时显示）。行内不显示账号；供应商已经在组头上。整行可点击，点一下打开该模型的请求明细浮窗（见下一节）；键盘 `Tab` 到它再按 `Enter`／空格同样打开。
 
 设置里的「耗时拆解」（`showTiming`）控制列表三列耗时的显示；关掉时三列显示 `—`。明细优先显示输出速度 `tok/s`，没有可用速度时显示 `—`，不根据总耗时猜测输出速度。
 
@@ -523,23 +523,31 @@ shell/package.cjs       签名、哈希、路径与兼容性校验
 shell/store.cjs         不覆盖当前文件的版本存储
 shell/journal.cjs       当前 / 待确认 / 回退版本状态
 shell/restart-worker.cjs 独立进程重启监督与设置恢复
+shell/recovery.cjs       设置恢复记录与路径校验
 shell/windows-blur.cjs  壳内 Windows 原生窗口能力
 src/main.js             窗口、托盘、长轮询、usage、拖动/缩放、设置面板、请求明细浮窗
 src/preload.js          contextBridge 白名单
+src/gateway-config.cjs  网关解析与本机地址校验
+src/launch-policy.cjs   心跳与拉起策略（隐藏 / 暂停 / 保活）
+src/window-bounds.cjs   窗口边界夹取
+src/window-material.cjs 透明窗口材质（卡片自带圆角与阴影）
 src/detail-placement.cjs 浮窗位置（贴卡片右侧 / 放不下翻左 / 夹取）
 web/index.html          卡片结构（含设置 / 关于抽屉）
 web/app.js              渲染、模型会话列表、数字滚动、设置交互
-web/model-sessions.mjs  卡片分组：按服务供应商、取每模型最近一次请求、额度与 6 行上限
+web/model-sessions.mjs  卡片分组：按服务供应商、取每模型最近一次请求、额度
 web/route-facts.mjs     一条 route 的事实提取（状态、实际服务模型、额度、本地时间）
 web/requests.mjs        明细投影：按（provider, 模型）过滤、倒序、分页
 web/detail.html         请求明细浮窗结构
 web/detail.js           请求明细浮窗渲染（分页、实时、关闭）
+web/download-progress.mjs 更新进度文案（已下载 / 总大小）
 web/timing.mjs          速度与耗时口径（tok/s、首字、总耗时）
 web/redact.mjs          诊断脱敏
 web/presenter.js        只根据 trace 生成文案
 web/brand-icons.mjs     加载随应用打包的品牌图标
 web/styles.css          浅灰卡片、Provider 分组、额度进度条、动效
 plugin/launch.hooks.mjs magpie 启动器插件（magpie.hooks 入口）
+plugin/install.mjs      自动下载安装、校验与安装包选择
+plugin/server.mjs       空 provider stub，避免被当成供应商插件
 assets/                 magpie 标志、Agent / 服务商品牌图标、托盘/应用图标
 tools/                  图标生成、模拟 trace、CDP 检查、Windows 打包
 tests/                  逻辑回归与 Electron 界面检查
