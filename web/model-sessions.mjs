@@ -3,11 +3,12 @@
 // projection over magpie's trace, so it can be read and tested without a
 // window or a clock.
 import { speedInfo } from './timing.mjs';
+import { planForGroup } from './plan-quota.mjs';
 import {
   timestamp, newest, servedModel, measured, rerouteCount, statusOf, seatOf, quotaOf, providerKeyOf,
 } from './route-facts.mjs';
 
-export function providerSessionGroups(routes, { limit = 6 } = {}) {
+export function providerSessionGroups(routes, { limit = 6, plans = null } = {}) {
   const cap = Math.max(0, Number(limit) || 0);
   const sorted = [...(Array.isArray(routes) ? routes : [])].sort(newest);
 
@@ -63,6 +64,20 @@ export function providerSessionGroups(routes, { limit = 6 } = {}) {
       row.ttft = measured(route.ttft) ?? measured(route.tries?.at(-1)?.ttft);
       const speed = speedInfo(route, route.tries?.at(-1));
       row.speed = speed ? speed.rate : null;
+    }
+  }
+
+  // A plan's windows are the vendor's own answer for this account and they come
+  // from a second endpoint, so they are attached after the groups are built: a
+  // group only knows which account it names once its first seat is read, and
+  // the plan has to be the one that account owns.
+  if (plans) {
+    for (const group of groups.values()) {
+      const plan = planForGroup(plans, group.key, group.account);
+      if (!plan) continue;
+      group.plan = plan;
+      // The bar describes the window the plan is holding right now.
+      group.quota = plan.primary;
     }
   }
 

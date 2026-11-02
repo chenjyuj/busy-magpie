@@ -9,6 +9,7 @@ import { brandKey, brandMark } from './brand-icons.mjs';
 import { downloadSize } from './download-progress.mjs';
 import { redactDiagnostic } from './redact.mjs';
 import { providerSessionGroups } from './model-sessions.mjs';
+import { plansByProvider, windowLabel } from './plan-quota.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -40,6 +41,7 @@ let settings = {
 let lastTrace = null;
 let usageData = null;
 let usageStatus = { loading: false, stale: false, at: 0, error: '' };
+let plans = new Map();
 let connection = { online: false, detail: '正在连接' };
 let layout = false;
 let frame = { cardHeight: 400, windowHeight: 216 };
@@ -47,6 +49,13 @@ let frame = { cardHeight: 400, windowHeight: 216 };
 const numberAnimations = new WeakMap();
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const motionReduced = () => Boolean(settings.quietMotion || reducedMotion.matches);
+
+// The plans the gateway reported, as one list per provider. Replaced whole on
+// every read: a provider that stopped reporting windows must not keep showing
+// the ones from before.
+function setPlans(entries) {
+  plans = plansByProvider(entries);
+}
 
 function iconSetup() {
   const icons = window.busy.icons || {};
@@ -1158,9 +1167,34 @@ function relativeTime(iso) {
   return `${Math.round(hours / 24)}d 前`;
 }
 
-// What the group head's hover says: how much of the window is gone and when
-// it renews. "0001-01-01" is magpie's marker for a vendor that never told it.
-function quotaTip(quota) {
+// What one window of a plan says on the card, shared by the head's line and its
+// tooltip so the two never disagree.
+function windowText(window) {
+  return `${windowLabel(window)} ${Math.round(window.remaining)}%`;
+}
+
+function windowTip(window) {
+  const bits = [`${windowLabel(window)} 剩余 ${Math.round(window.remaining)}%`,
+    `已用 ${window.used.toFixed(1).replace(/\.0$/, '')}%`];
+  if (window.amount && window.limit) {
+    bits.push(`${Math.round(window.amount).toLocaleString('zh-CN')} / ${Math.round(window.limit).toLocaleString('zh-CN')}${window.unit ? ` ${window.unit}` : ''}`);
+  }
+  if (window.renewAt && !window.renewAt.startsWith('0001-')) {
+    const when = new Date(window.renewAt);
+    if (!Number.isNaN(when.getTime())) bits.push(`${when.getMonth() + 1}/${when.getDate()} 续期`);
+  }
+  return bits.join(' · ');
+}
+
+// What the group head's hover says: how much of the window is gone and when it
+// renews. "0001-01-01" is magpie's marker for a vendor that never told it. A
+// plan's tooltip names every window it is split into, because the bar only
+// describes the one it is holding now.
+function quotaTip(quota, plan) {
+  if (plan && plan.windows.length > 1) {
+    return `套餐窗口：${plan.windows.map(windowTip).join(' ｜ ')}`;
+  }
+  if (!quota) return '';
   const bits = [`已用 ${quota.used.toFixed(1).replace(/\.0$/, '')}%`];
   if (quota.amount && quota.limit) {
     bits.push(`${Math.round(quota.amount).toLocaleString('zh-CN')} / ${Math.round(quota.limit).toLocaleString('zh-CN')}${quota.unit ? ` ${quota.unit}` : ''}`);
@@ -1174,9 +1208,9 @@ function quotaTip(quota) {
 
 // The provider's allowance as a horizontal bar on the group head. A bar is
 // only drawn when the vendor actually reports the number.
-function quotaBarNode(quota) {
+function quotaBarNode(quota, plan) {
   const wrap = create('span', 'provider-quota');
-  const remaining = Math.max(0, Math.min(100, quota.remaining));
+  const remaining = Math.max(0, Math.min(100, quota ? quota.remaining : 0));
   wrap.append(create('span', 'provider-left', `剩余 ${Math.round(remaining)}%`));
   const bar = create('span', 'provider-bar');
   const fill = create('i');
@@ -1185,7 +1219,12 @@ function quotaBarNode(quota) {
   fill.style.width = `${Math.max(1.5, remaining).toFixed(1)}%`;
   bar.append(fill);
   wrap.append(bar);
-  const tip = quotaTip(quota);
+  // A plan splits its allowance into time windows: the bar names the one it is
+  // holding now, and the line below names the rest.
+  if (plan && plan.windows.length > 1) {
+    wrap.append(create('span', 'provider-windows', plan.windows.map(windowText).join(' · ')));
+  }
+  const tip = quotaTip(quota, plan);
   if (tip) wrap.title = tip;
   return wrap;
 }
@@ -1193,9 +1232,9 @@ function quotaBarNode(quota) {
 function providerGroupNode(group) {
   const node = create('div', 'provider-group');
   node.dataset.provider = group.key;
-  const head = create('div', 'provider-head');
+  const head = create('div', 'provider-head' + (group.plan ? ' provider-head-plan' : ''));
   head.append(create('b', '', group.provider));
-  if (group.quota) head.append(quotaBarNode(group.quota));
+  if (group.quota || group.plan) head.append(quotaBarNode(group.quota, group.plan));
   node.append(head);
   for (const row of group.models) node.append(modelRowNode(row, group));
   return node;
@@ -1277,7 +1316,7 @@ function render() {
   const online = Boolean(connection.online && lastTrace);
   if (online) {
     document.body.classList.remove('stale');
-    const { groups, hiddenCount } = providerSessionGroups(routes, { limit: Number.POSITIVE_INFINITY });
+    const { groups, hiddenCount } = providerSessionGroups(routes, { limit: Number.POSITIVE_INFINITY, plans });
     renderProviderGroups(groups, hiddenCount);
   } else {
     // A dropped gateway keeps the last frame on screen and labels it stale
@@ -1320,6 +1359,7 @@ async function boot() {
   if (data.trace) lastTrace = data.trace;
   if (data.usage) usageData = data.usage;
   if (data.usageStatus) usageStatus = data.usageStatus;
+  if (data.quotas) setPlans(data.quotas);
   applyFrame(data.frame);
   applyGateway();
   setLayout(data.layout);
@@ -1329,6 +1369,11 @@ async function boot() {
   window.busy.onTrace((trace) => {
     lastTrace = trace;
     connection = { online: true, detail: settings.gateway };
+    render();
+  });
+
+  window.busy.onQuotas((next) => {
+    if (Array.isArray(next?.data)) setPlans(next.data);
     render();
   });
 

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { providerSessionGroups } from '../web/model-sessions.mjs';
+import { plansByProvider } from '../web/plan-quota.mjs';
 
 const at = second => new Date(Date.UTC(2026, 9, 31, 13, 0, second)).toISOString();
 const route = (id, extra = {}) => ({
@@ -95,6 +96,37 @@ test('a seat without a quota window has no allowance, not a full one', () => {
   ]);
   assert.equal(windowless.groups[0].quota, null);
   assert.equal(windowless.groups[0].provider, 'OfficeAce');
+});
+
+test('a plan group draws its windows, and the bar names the one the plan holds', () => {
+  const { groups } = providerSessionGroups([
+    route(1, { provider: 'opencode-go', order: [{ id: 'acct1', provider: 'opencode-go', name: 'opencode go', kind: 'key', who: '6', model: 'm1' }] }),
+  ], {
+    plans: plansByProvider([{
+      provider: 'opencode-go', name: 'opencode go', kind: 'plan', user: '6',
+      windows: [
+        { name: '5 hours', remaining: 95, resetsAt: '2026-11-02T06:13:57Z', holdsWhy: 'none' },
+        { name: '7 days', remaining: 98, resetsAt: '2026-11-09T00:00:00Z', holdsWhy: 'low' },
+        { name: 'Month', remaining: 94, resetsAt: '2026-11-30T07:39:30Z', holdsWhy: 'clock' },
+      ],
+    }]),
+  });
+  const group = groups.find(g => g.key === 'opencode-go');
+  assert.equal(group.plan.windows.length, 3);
+  assert.equal(group.quota.remaining, 94, 'the bar describes the window the plan is holding');
+  assert.equal(group.quota.renewAt, '2026-11-30T07:39:30Z');
+  assert.equal(group.quota.unit, '');
+});
+
+test('a provider without a plan keeps its seat allowance and no plan', () => {
+  const { groups } = providerSessionGroups([
+    withQuota(route(1, { provider: 'officeace' }), {
+      known: true, used: 11, amount: 5755, limit: 9600, unit: 'credits',
+      renews: ['2026-11-19T16:00:00Z'], usedRenews: '2026-11-19T16:00:00Z',
+    }),
+  ], { plans: plansByProvider([]) });
+  assert.equal(groups[0].plan, undefined);
+  assert.equal(groups[0].quota.remaining, 89);
 });
 
 test('a live request keeps the metrics of the last completed one', () => {

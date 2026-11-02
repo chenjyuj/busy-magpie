@@ -30,6 +30,14 @@ Endpoints
 
     {period, calls, errors, retried, input, output, cache_read, cache_write}
 
+``GET /v1/magpie/quotas``::
+
+    {object, data:[{provider, name, kind, user, windows:[{name, used, remaining,
+    resetsAt, holdsWhy}], last?}]}
+
+    A plan (kind ``plan``) splits its allowance into time windows; the card
+    names the window the plan is holding and lists the rest under it.
+
 ``GET /`` is an alias of the trace endpoint, handy for a quick ``curl``/``Invoke-WebRequest``.
 
 Every route carries (per the design spec §3 field list, trimmed to the fields
@@ -74,6 +82,12 @@ Scenarios (all deterministic — no RNG anywhere)
             and no ``out`` → 时长 shown, 首字 `—`, tok/s `—` (the `—` path).
 ``many``    7 routes, 7 distinct ``served`` models → 6 rows + the
             「+1 个模型」 summary row (hiddenCount 1).
+``quota``   one allowance window per provider: 89% / 40% / 15% left → green,
+            amber and red bars, plus one vendor whose quota could not be read
+            (a pay-as-you-go key) → no bar at all.
+``plan``    one provider on a plan: the head names the window the plan is
+            holding (本月 94%) and the line under it names the windows it is
+            split into (5H 95% · 7D 98% · 本月 94%).
 ``flaky``   starts exactly like ``ok``, then every trace request from the Nth
             on answers HTTP 500 (default ``MOCK_FLAKY_AFTER=3``) or drops the
             connection (``MOCK_FLAKY_MODE=close``). The widget must keep the
@@ -125,7 +139,7 @@ from urllib.parse import parse_qs, urlparse
 # Route times hang off this instant, so every run of a scenario is identical.
 BASE = datetime.now().astimezone()
 
-SCENARIOS = ("ok", "error", "live", "missing", "many", "one", "detail", "quota", "flaky", "empty")
+SCENARIOS = ("ok", "error", "live", "missing", "many", "one", "detail", "quota", "plan", "flaky", "empty")
 
 USAGE_PERIODS = ("today", "7d", "30d", "all")
 
@@ -149,6 +163,41 @@ PROVIDER_NAMES = {
     "codearts": "CodeArts",
     "trae-cn": "Trae CN",
     "hub-magicrew": "MagiCrew CN",
+    "opencode-go": "opencode go",
+}
+
+# A plan (套餐) splits its allowance into time windows rather than describing
+# one allowance: opencode go is 5 hours, 7 days and the month. The card names
+# the window the plan is holding and lists the rest under it. The numbers are
+# fixed so a screenshot can be re-checked.
+PLANS = [
+    {
+        "provider": "opencode-go",
+        "name": "opencode go",
+        "kind": "plan",
+        "user": "6",
+        "windows": [
+            {"name": "5 hours", "used": 5, "remaining": 95, "resetsAt": "2026-11-02T06:13:57Z", "holdsWhy": "none"},
+            {"name": "7 days", "used": 2, "remaining": 98, "resetsAt": "2026-11-09T00:00:00Z", "holdsWhy": "low"},
+            {"name": "Month", "used": 6, "remaining": 94, "resetsAt": "2026-11-30T07:39:30Z", "holdsWhy": "clock"},
+        ],
+        "last": True,
+    },
+]
+
+# A plan seat reports the share of its window it is holding, not a credit
+# allowance: magpie marks it "known" with a "used" percent and a renewal time,
+# but no limit, so the card draws no bar from the seat and reads the plan's
+# windows instead.
+PLAN_SEATS = {
+    "opencode-go": {
+        "kind": "key",
+        "known": True,
+        "used": 6,
+        "renews": ["2026-11-09T00:00:00Z", "2026-11-02T06:13:57Z", "2026-11-30T07:39:30Z"],
+        "usedRenews": "2026-11-30T07:39:30Z",
+        "rank": 6,
+    },
 }
 
 # Fixed allowance per provider so a screenshot can be re-checked: officeace
@@ -177,6 +226,7 @@ SCENARIO_NOTES = {
     "one": "one provider with one model: the smallest useful card",
     "detail": "25 requests for one model: newest still streaming, one failed, one without a first byte -> the detail window pages them 20 at a time",
     "quota": "89% / 40% / 15% left -> green, amber and red bars; plus one vendor with no window at all -> no bar",
+    "plan": "one provider on a plan -> 本月 94% bar plus the 5H / 7D / 本月 window line",
     "flaky": "ok at first, then HTTP 500 / dropped connection from the Nth trace request",
     "empty": "a live gateway that has answered nothing yet: no routes -> 等待 magpie 数据",
 }
@@ -246,6 +296,9 @@ def attempt(provider: str, who: str, model: str, *, done: bool = True,
     windowless = WINDOWLESS.get(provider)
     if windowless:
         order_item.update(windowless)
+    plan_seat = PLAN_SEATS.get(provider)
+    if plan_seat:
+        order_item.update(plan_seat)
     return try_item, order_item
 
 
@@ -423,6 +476,17 @@ def scenario_quota() -> list[dict]:
     ]
 
 
+def scenario_plan() -> list[dict]:
+    """One provider on a plan: the head names the window the plan is holding
+    (本月 94%) and the line under it names the windows it is split into
+    (5H 95% · 7D 98% · 本月 94%)."""
+    return [
+        make_route(1792464002801, 10, agent="dsh", requested="opencode-go/deepseek-v4.1-flash",
+                   served="deepseek-v4.1-flash", provider="opencode-go", who="6",
+                   conv="01a1546e-3108-78a1", ms=3000, ttft=600, out=240),
+    ]
+
+
 DETAIL_COUNT = 25
 
 
@@ -474,6 +538,7 @@ BUILDERS = {
     "one": scenario_one,
     "detail": scenario_detail,
     "quota": scenario_quota,
+    "plan": scenario_plan,
     "flaky": scenario_flaky,
     "empty": scenario_empty,
 }
@@ -565,6 +630,12 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             self.send_json(usage_payload(query.get("period", ["30d"])[0]))
             return
+        if parsed.path == "/v1/magpie/quotas":
+            # The plan windows a provider is split into, as magpie's own quota
+            # endpoint reports them. The card names the window the plan is
+            # holding and lists the rest under it.
+            self.send_json({"object": "quotas", "data": PLANS})
+            return
         if parsed.path not in ("/v1/magpie/trace", "/"):
             self.send_json({"error": f"mock_models has no route for {parsed.path}"}, status=404)
             return
@@ -618,6 +689,7 @@ def banner(port: int) -> str:
         f"  routes   : {len(ROUTES)} · rerouted {rerouted} · errors {errors} · pid {PID}",
         f"  trace    : GET /v1/magpie/trace?after=<seq>&wait=1  (holds {WAIT_MS} ms)",
         f"  usage    : GET /v1/magpie/usage?period=today|7d|30d|all",
+        f"  quotas   : GET /v1/magpie/quotas  (the plan windows, e.g. 5 hours / 7 days / Month)",
         f"  times    : frozen at startup, newest route {base} (offsets never move)",
     ]
     if SCENARIO == "flaky":

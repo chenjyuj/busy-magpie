@@ -4,7 +4,7 @@
 
 **A transparent live model-session perch for your desktop.**
 
-一张浅灰、无边框的实时卡片，面板内的鼠标点击不会穿透到下面的窗口。它读取 magpie 本机 trace，按服务供应商分组显示最近的会话：每个供应商一个组头（含额度进度条），组内每个模型一行，给出最近一次请求的时长、首字节、token/s 和状态，以及这段时间用了多少 token。
+一张浅灰、无边框的实时卡片，面板内的鼠标点击不会穿透到下面的窗口。它读取 magpie 本机 trace，按服务供应商分组显示最近的会话：每个供应商一个组头（含额度进度条，套餐供应商还会列出它的时间窗口），组内每个模型一行，给出最近一次请求的时长、首字节、token/s 和状态，以及这段时间用了多少 token。
 
 A transparent, borderless card that blocks clicks within the panel, reads magpie's local trace and groups recent sessions by the model that actually served them, showing duration, time to first byte, tokens per second and status per model, plus the total tokens used.
 
@@ -23,7 +23,7 @@ magpie 的「路由」页很好看，但它只在 magpie 自己的窗口里。Bu
 - **浅色、无边框**，不挡桌面。卡片是一张浅灰不透明的圆角卡片，文字和控件保持清晰。
 - **阻挡点击**：面板内的鼠标点击不会落到下面的窗口，主视图和紧凑模式都生效。
 - **不修改 magpie**：只读取本机的 `/v1/magpie/trace` 和 `/v1/magpie/usage`。
-- **按服务供应商分组**：每个供应商一个灰色组头，组头带额度进度条（剩余 ≥50% 绿、20–49% 橙、<20% 红，没报额度就不画）；组内每个模型一行，显示最近一次请求的时长、首字节、token/s 和状态，所有模型都显示，窗口装不下时列表内部滚动。请求进行中时，这一行保留上一次完成请求的数据。
+- **按服务供应商分组**：每个供应商一个灰色组头，组头带额度进度条（剩余 ≥50% 绿、20–49% 橙、<20% 红，没报额度就不画）；套餐供应商还会多列一行它的时间窗口（如 opencode go 的 5H / 7D / 本月）；组内每个模型一行，显示最近一次请求的时长、首字节、token/s 和状态，所有模型都显示，窗口装不下时列表内部滚动。请求进行中时，这一行保留上一次完成请求的数据。
 - **缺失指标就留空**：拿不到时长、首字节或输出速度时显示 `—`，不编造 `0ms` / `0 tok/s`。
 - **不随请求数量变高变矮**：窗口尺寸稳定，需要更大或更小时手动拖边框。
 - **总 token + 逐位滚动 + 单击换窗口**：读取 magpie usage，单击在 今日 / 7 天 / 30 天 / 全部 之间循环。
@@ -69,6 +69,12 @@ setx BUSY_MAGPIE_APP "D:\Apps\Busy Magpie\Busy Magpie.exe"
 ![多个模型](./docs/screenshots/multi.png)
 
 多个模型各占一行，按最近活动倒序排列，最活跃的在最上面。改道过的行在测量行开头带「改道 N 次」的橙色小标；模型很多时列表内部滚动（滚轮或滚动条）。
+
+### 套餐供应商
+
+![套餐窗口](./docs/screenshots/plan.png)
+
+供应商的额度是一组时间窗口时（如 opencode go 的 5 小时 / 7 天 / 本月），组头会多出一行：第一行的额度条描述「套餐现在被哪个窗口约束着」，第二行列出套餐的**全部窗口**。悬停组头可以看到每个窗口的已用百分比与续期日。
 
 ### 设置
 
@@ -239,6 +245,20 @@ MAGICREW CN                                          （无额度窗口，不画
 - 颜色按剩余量分档：≥ 50% 绿、20–49% 橙、< 20% 红；悬停组头看「额度窗口：已用 5755 / 9600 credits · 11/19 续期」。
 
 > **它不等于供应商账户的实时余额**。这条百分比是 magpie 自己的额度窗口模型（与 magpie 额度页同口径）；trace 里没有供应商的实时积分余额字段。所以供应商接口回「积分不足」时，卡片可能仍显示窗口剩余若干——那是 magpie 记录的上一次窗口读数，不是当下余额。要看真实余额得看供应商自己的页面。
+
+### 套餐窗口（plan）
+
+有些供应商的额度不是一个窗口，而是一组**时间窗口**——opencode go 就是 5 小时 / 7 天 / 本月三个窗口，每个窗口各自算剩余量。这类供应商的组头会多出一行：
+
+```text
+OPENCODE GO                        剩余 94%  ████████████████░░░
+                                 5H 95% · 7D 98% · 本月 94%
+```
+
+- 第一行的额度条仍然是「这个供应商现在被哪个窗口约束着」：优先取 magpie 标了 `holdsWhy: "clock"` 的窗口，没标就取剩余最少的那个。
+- 第二行列出该套餐的**全部窗口**，用 `5H` / `7D` / `本月` 这种短标签；悬停看每个窗口的已用百分比、额度和续期日。
+- 数据来自 `/v1/magpie/quotas` 的 `data[]`，按 `provider` 匹配组。同一供应商有多个账号时，按组头账号的 `user` 取自己那条，取不到再退到 magpie 标了 `last` 的那条。
+- 套餐供应商只要 `kind: "plan"` 且至少有一个可读窗口就按套餐画；没有窗口就不画套餐行，也不拿普通额度条顶替。
 
 每行五列，列宽固定，数字变长也不会让整行抖动：
 
@@ -459,6 +479,7 @@ OfficeAce · glm-5.3                                  ×
 magpie 本机网关 (:3425)
    │  GET /v1/magpie/trace   (long poll, 增量合并)
    │  GET /v1/magpie/usage   (总量)
+   │  GET /v1/magpie/quotas  (套餐的时间窗口)
    ▼
 Electron 主进程
    │  IPC
@@ -466,10 +487,11 @@ Electron 主进程
 浅色不透明 BrowserWindow
    │
    ├─ 顶部：token 胶囊 / 右上角菜单与版本号
-   └─ 主体：按服务供应商分组的模型会话列表（组头带额度进度条）
+   └─ 主体：按服务供应商分组的模型会话列表（组头带额度进度条；套餐供应商多列一行窗口）
 ```
 
 - trace 的 `after=seq` 返回的是**变化路由**，不是完整快照。主进程维护合并表，保证早开始、仍在执行的 Agent 不会从卡片消失。
+- `/v1/magpie/quotas` 是套餐的额度通道：套餐的额度不是一个窗口而是一组时间窗口，trace 的账号条目只报告「当前被哪个窗口约束」，读不到每个窗口的剩余量，所以卡片单独读它。读不到时不画套餐行，也不拿普通额度条顶替。
 - 渲染层没有 Node 权限，也不直接访问网络；所有请求都在主进程完成。
 - 账号信息只在本地页面里展示；默认打码，不写日志。
 
@@ -499,6 +521,15 @@ BUSY_MAGPIE_GATEWAY=http://127.0.0.1:3500 npm start
 ```
 
 `mock_multi.py` 也提供 `/v1/magpie/usage`，所以 token 胶囊在模拟环境里同样可用；它给每条请求都写了 `tries`，列表按最后一次尝试的模型分组。
+
+套餐场景用 `mock_models.py plan`（它额外提供 `/v1/magpie/quotas`），然后核对卡片会画什么：
+
+```bash
+python tools/mock_models.py 3500 plan
+BUSY_MAGPIE_GATEWAY=http://127.0.0.1:3500 node tools/quota-audit.mjs
+```
+
+`quota-audit.mjs` 用渲染层同一个 `providerSessionGroups` 读真实网关，打印每个组的额度条、套餐窗口与颜色档，方便对照卡片。
 
 调试渲染层：
 
@@ -536,6 +567,7 @@ web/index.html          卡片结构（含设置 / 关于抽屉）
 web/app.js              渲染、模型会话列表、数字滚动、设置交互
 web/model-sessions.mjs  卡片分组：按服务供应商、取每模型最近一次请求、额度
 web/route-facts.mjs     一条 route 的事实提取（状态、实际服务模型、额度、本地时间）
+web/plan-quota.mjs      套餐窗口：窗口归一化、绑定窗口、按供应商索引
 web/requests.mjs        明细投影：按（provider, 模型）过滤、倒序、分页
 web/detail.html         请求明细浮窗结构
 web/detail.js           请求明细浮窗渲染（分页、实时、关闭）

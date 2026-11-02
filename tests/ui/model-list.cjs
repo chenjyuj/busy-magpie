@@ -24,10 +24,23 @@ const checks = [];
 const errors = [];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const record = name => { checks.push(name); console.log('PASS', name); };
+// A provider's plan, as the gateway's own quota endpoint reports it: the
+// allowance split into the time windows the plan is made of.
+const planSeats = [{
+  provider: 'opencode-go', name: 'opencode go', kind: 'plan', user: '6',
+  windows: [
+    { name: '5 hours', used: 5, remaining: 95, resetsAt: '2026-11-02T06:13:57Z', holdsWhy: 'none' },
+    { name: '7 days', used: 2, remaining: 98, resetsAt: '2026-11-09T00:00:00Z', holdsWhy: 'low' },
+    { name: 'Month', used: 6, remaining: 94, resetsAt: '2026-11-30T07:39:30Z', holdsWhy: 'clock' },
+  ],
+  last: true,
+}];
 const server = http.createServer((req, res) => {
   const data = req.url.includes('/usage')
     ? { period: '30d', calls: 3, input: 14120, output: 1650, cache_read: 520 }
-    : { seq: 1, pid: 12345, totals: { requests: 3, rerouted: 0, errors: 0 }, routes: [] };
+    : req.url.includes('/quotas')
+      ? { data: planSeats, object: 'list' }
+      : { seq: 1, pid: 12345, totals: { requests: 3, rerouted: 0, errors: 0 }, routes: [] };
   setTimeout(() => {
     if (!res.destroyed) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); }
   }, req.url.includes('wait=') ? 100 : 0);
@@ -91,6 +104,8 @@ async function run() {
       provider: group.dataset.provider,
       title: group.querySelector('.provider-head b')?.textContent ?? null,
       remaining: group.querySelector('.provider-left')?.textContent ?? null,
+      windows: group.querySelector('.provider-windows')?.textContent ?? null,
+      headPlan: Boolean(group.querySelector('.provider-head-plan')),
       barClass: group.querySelector('.provider-bar i')?.className ?? null,
       barWidth: group.querySelector('.provider-bar i')?.style.width ?? null,
       hasBar: Boolean(group.querySelector('.provider-quota')),
@@ -190,6 +205,40 @@ async function run() {
     assert.equal(blind.hasBar, false, 'a windowless seat must not claim 100% left');
     assert.equal(blind.remaining, null);
     record('a provider with no reported allowance shows no bar at all');
+
+    // 3b. A plan the gateway reports splits its allowance into time windows, so
+    //     the head names the window it is holding and the line under it names
+    //     the rest (5H / 7D / 本月).
+    await feed([route(1, 'deepseek-v4.1-flash', {
+      provider: 'opencode-go', providerName: 'opencode go', account: '6',
+    })]);
+    let plan = null;
+    for (let n = 0; n < 40 && !plan; n += 1) {
+      plan = (await groups()).find(group => group.provider === 'opencode-go');
+      if (!plan?.windows) { await sleep(100); plan = null; }
+    }
+    assert.ok(plan, 'the opencode go group is drawn');
+    assert.equal(plan.remaining, '剩余 94%', 'the bar names the window the plan is holding');
+    assert.equal(plan.barWidth.startsWith('94'), true, `the bar is 94% wide (${plan.barWidth})`);
+    assert.equal(plan.windows, '5H 95% · 7D 98% · 本月 94%');
+    assert.equal(plan.headPlan, true, 'the plan head wraps its second line');
+    const planTip = await js(`document.querySelector('.provider-quota')?.title || ''`);
+    assert.match(planTip, /5H 剩余 95%/);
+    assert.match(planTip, /7D 剩余 98%/);
+    assert.match(planTip, /本月 剩余 94%/);
+    const planLayout = await js(`(()=>{const head=document.querySelector('.provider-head-plan');
+      const quota=head.querySelector('.provider-quota');
+      const windows=quota.querySelector('.provider-windows');
+      const headBox=head.getBoundingClientRect();
+      const quotaBox=quota.getBoundingClientRect();
+      const windowsBox=windows.getBoundingClientRect();
+      return {headLines: Math.round(headBox.height), right: Math.round(quotaBox.right),
+        windowsRight: Math.round(windowsBox.right), width: Math.round(headBox.width),
+        windowsWidth: Math.round(windowsBox.width)};})()`);
+    assert.ok(planLayout.windowsRight <= planLayout.right + 1, 'the window line stays under the bar');
+    assert.ok(planLayout.windowsWidth < planLayout.width, 'the window line does not run past the head');
+    fs.writeFileSync(path.join(output, 'plan.png'), (await win.webContents.capturePage()).toPNG());
+    record('a plan head names the window it holds and the windows it is split into');
 
     // 4. A live request keeps the last completed metrics and only flips the state.
     await feed([

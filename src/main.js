@@ -99,6 +99,11 @@ let usageData = null;
 let usageStatus = { loading: false, stale: false, at: 0, error: '', period: '' };
 let usageRequest = null;
 let usageTimer = null;
+let quotaTimer = null;
+// The plans the card draws a window list for (a provider's allowance split
+// into time windows), as the gateway's own quota endpoint reported them.
+let quotaData = null;
+let quotaRequest = null;
 let connection = { online: false, detail: '正在连接' };
 let layoutMode = false;
 let layoutTimer = null;
@@ -1372,6 +1377,7 @@ function rebuildClient() {
   client = new TraceClient(info.url);
   client.start();
   refreshUsage(normalizePeriod(settings.usagePeriod));
+  refreshQuotas();
 }
 
 async function refreshUsage(requestedPeriod) {
@@ -1419,6 +1425,52 @@ async function refreshUsage(requestedPeriod) {
     } finally {
       clearTimeout(timeout);
       if (usageRequest === request) usageRequest = null;
+    }
+  }
+}
+
+// A provider's plan windows (opencode go is 5 hours, 7 days and the month)
+// come from their own endpoint: a plan is a set of time windows rather than one
+// allowance the trace seat describes, and the seat that carried a request only
+// says which window it was holding. The card draws a window list for providers
+// that report a plan, and a failed read keeps the last answer, the way the
+// usage read does.
+async function refreshQuotas() {
+  if (quotaRequest) quotaRequest.controller.abort();
+  const controller = new AbortController();
+  const request = { controller, promise: null };
+  quotaRequest = request;
+  request.promise = readQuotas();
+  return request.promise;
+
+  async function readQuotas() {
+    const timeout = setTimeout(() => controller.abort(), 6000);
+    try {
+      const info = gatewayInfo();
+      if (!info.url) throw new Error(info.error);
+      const response = await fetch(`${info.url}/v1/magpie/quotas`, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        throw new Error(`额度接口返回 HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      if (quotaRequest !== request) return null;
+      const list = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+      if (!list.length) throw new Error('额度接口没有返回套餐');
+      quotaData = list;
+      send('magpie:quotas', { data: quotaData });
+      return quotaData;
+    } catch (error) {
+      if (quotaRequest !== request) return null;
+      const detail = error.name === 'AbortError' ? '读取额度超时' : error.message;
+      log(`quotas unavailable: ${detail}`);
+      return null;
+    } finally {
+      clearTimeout(timeout);
+      if (quotaRequest === request) quotaRequest = null;
     }
   }
 }
@@ -1798,6 +1850,7 @@ function quit() {
   clearTimeout(layoutTimer);
   clearInterval(hoverTimer);
   clearInterval(usageTimer);
+  clearInterval(quotaTimer);
   clearInterval(updateTimer);
   clearInterval(quietTimer);
   quietTimer = null;
@@ -1834,6 +1887,7 @@ ipcMain.handle('busy:bootstrap', () => ({
   trace: lastTrace,
   usage: usageData,
   usageStatus,
+  quotas: quotaData,
   layout: layoutMode,
   frame,
 }));
@@ -2091,6 +2145,7 @@ function init() {
   rebuildClient();
   watchTrace();
   usageTimer = setInterval(refreshUsage, 20000);
+  quotaTimer = setInterval(refreshQuotas, 20000);
   setTimeout(() => checkForUpdates(false), 2500);
   updateTimer = setInterval(() => checkForUpdates(false), UPDATE_CHECK_MS);
 

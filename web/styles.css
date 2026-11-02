@@ -3507,6 +3507,30 @@ body.native-material .card {
 .provider-bar i.mid { background: #ff9500; }
 .provider-bar i.low { background: #ff3b30; }
 
+/* A plan splits its allowance into time windows, so its head reads one window
+   per line: the bar the plan is holding now, then every window it is split
+   into (5H / 7D / 本月). The line sits directly under the bar and stays right
+   aligned, so the head keeps its shape and the rows below do not shift. */
+.provider-head-plan {
+  flex-wrap: wrap;
+}
+
+.provider-head-plan .provider-quota {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.provider-windows {
+  color: #86868b;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
 /* ── one row per model ───────────────────────────────────────────────────────
    The card is a 500x333 canvas scaled to the window, which lands near 0.56 —
    canvas type much below 20px arrives on screen too small to read. A row
