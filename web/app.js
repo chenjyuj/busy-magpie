@@ -113,11 +113,14 @@ function applyUiScale() {
   root.style.setProperty('--canvas-w', `${canvasW.toFixed(2)}px`);
   root.style.setProperty('--canvas-h', `${canvasH.toFixed(2)}px`);
   root.style.setProperty('--font-zoom', String(zoom));
-  const scale = Math.max(
-    0.3,
-    Math.min(2.6, Math.min(area.width / canvasW, area.height / canvasH)),
-  );
-  document.documentElement.style.setProperty('--ui', scale.toFixed(4));
+  // The window is no longer locked to the canvas ratio, so each axis scales to
+  // fill its own length. --ui stays the smaller of the two for anything that
+  // still reads a single scale.
+  const scaleX = Math.max(0.3, Math.min(2.6, area.width / canvasW));
+  const scaleY = Math.max(0.3, Math.min(2.6, area.height / canvasH));
+  root.style.setProperty('--ui-x', scaleX.toFixed(4));
+  root.style.setProperty('--ui-y', scaleY.toFixed(4));
+  root.style.setProperty('--ui', Math.min(scaleX, scaleY).toFixed(4));
   requestAnimationFrame(reportHitAreas);
 }
 

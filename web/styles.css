@@ -440,7 +440,10 @@ body.native-material .node { background-color: rgb(12 16 25 / 0.32); }
      same 20px name reads bigger without the window changing. */
   width: var(--canvas-w, 500px);
   height: var(--canvas-h, 333px);
-  transform: translate(-50%, -50%) scale(var(--ui, 1));
+  /* Each axis stretches to fill its own length: the window is no longer locked
+     to the canvas ratio, so a wider-than-tall window stretches horizontally and
+     a taller-than-wide one vertically. */
+  transform: translate(-50%, -50%) scale(var(--ui-x, 1), var(--ui-y, 1));
   transform-origin: center center;
   pointer-events: none;
 }

@@ -31,9 +31,9 @@ const DETAIL_WIDTH = 420;
 const DETAIL_HEIGHT = 520;
 const COMPACT_WIDTH = 180;
 const COMPACT_HEIGHT = 56;
-// The card is drawn on a 600×400 canvas inside 16px of padding. Keeping the
-// window at that shape is what lets the canvas scale up to fill it instead of
-// leaving dark bands above and below.
+// The card is drawn on a canvas inside 16px of padding. A preset, or a stored
+// size that only carried a width, is given this shape; the window itself is no
+// longer locked to it, so each resize axis moves on its own.
 const CARD_RATIO = 600 / 400;
 const CARD_PAD = 32;
 // The card got half as big, so the range it may be resized within did too.
@@ -47,10 +47,6 @@ const SIZE_EPOCH = 2;
 
 function heightForWidth(width) {
   return Math.round((width - CARD_PAD) / CARD_RATIO) + CARD_PAD;
-}
-
-function widthForHeight(height) {
-  return Math.round((height - CARD_PAD) * CARD_RATIO) + CARD_PAD;
 }
 const ASSETS = path.join(__dirname, '..', 'assets');
 const RENDERER = path.join(__dirname, '..', 'web', 'index.html');
@@ -214,20 +210,14 @@ function normalizeUpdateMode(value) {
   return UPDATE_MODES.includes(mode) ? mode : 'idle';
 }
 
-// A stored size is snapped back to the card's shape, within the allowed
-// range, so a window saved before the shape was enforced still fits.
-function normalizeSize(width) {
-  let w = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Number(width) || WIDTH));
-  let h = heightForWidth(w);
-  if (h > MAX_HEIGHT) {
-    h = MAX_HEIGHT;
-    w = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, widthForHeight(h)));
-  }
-  if (h < MIN_HEIGHT) {
-    h = MIN_HEIGHT;
-    w = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, widthForHeight(h)));
-  }
-  return { width: w, height: h };
+// A stored size is clamped into the allowed range on each axis. The window is
+// no longer locked to the canvas ratio, so width and height travel separately;
+// a height an old profile never stored is derived from the width.
+function normalizeSize(width, height) {
+  const w = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Number(width) || WIDTH));
+  const h = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT,
+    Number(height) > 0 ? Number(height) : heightForWidth(w)));
+  return { width: Math.round(w), height: Math.round(h) };
 }
 
 function loadSettings() {
@@ -242,7 +232,9 @@ function loadSettings() {
     // NaN and every NaN comparison is false, so default it explicitly.)
     const epoch = Number(parsed.sizeEpoch) || 1;
     const legacySize = epoch < SIZE_EPOCH && Number(parsed.width) > 0;
-    const size = normalizeSize(legacySize ? Math.round(Number(parsed.width) / 2) : parsed.width);
+    const size = legacySize
+      ? normalizeSize(Math.round(Number(parsed.width) / 2), Math.round(Number(parsed.height) / 2))
+      : normalizeSize(parsed.width, parsed.height);
     return {
       ...defaults(),
       ...parsed,
@@ -356,14 +348,8 @@ function clampBounds(x, y, width = WIDTH, height = HEIGHT) {
 function createWindow() {
   nativeTheme.themeSource = 'dark';
   const area = screen.getPrimaryDisplay().workArea;
-  let width = Math.max(MIN_WIDTH, Math.min(settings.width || WIDTH, area.width - 20));
-  let height = heightForWidth(width);
-  const maxHeight = Math.min(area.height - 20, MAX_HEIGHT);
-  if (height > maxHeight) {
-    height = Math.max(MIN_HEIGHT, maxHeight);
-    width = Math.max(MIN_WIDTH, Math.min(area.width - 20, widthForHeight(height)));
-    height = heightForWidth(width);
-  }
+  let width = Math.max(MIN_WIDTH, Math.min(settings.width || WIDTH, area.width - 20, MAX_WIDTH));
+  let height = Math.max(MIN_HEIGHT, Math.min(settings.height || heightForWidth(width), area.height - 20, MAX_HEIGHT));
   settings.width = width;
   settings.height = height;
   const compact = Boolean(settings.compact);
@@ -1254,28 +1240,9 @@ function startResize(direction = 'se') {
       height = Math.max(state.minHeight, Math.min(state.maxH, height - dy));
     }
 
-    // The card keeps its shape, so the scaled canvas always fills it: a
-    // horizontal drag sets the width and the height follows, and the other
-    // way round for a vertical edge.
-    if (dir.includes('e') || dir.includes('w')) {
-      height = heightForWidth(width);
-      if (height > state.maxH) {
-        height = state.maxH;
-        width = widthForHeight(height);
-      } else if (height < state.minHeight) {
-        height = state.minHeight;
-        width = widthForHeight(height);
-      }
-    } else {
-      width = widthForHeight(height);
-      if (width > state.maxW) {
-        width = state.maxW;
-        height = heightForWidth(width);
-      } else if (width < state.minWidth) {
-        width = state.minWidth;
-        height = heightForWidth(width);
-      }
-    }
+    // Each edge moves its own axis: a horizontal drag changes the width and a
+    // vertical one the height, and a corner does both. The canvas stretches to
+    // fill whatever shape the window ends up in.
     width = Math.max(state.minWidth, Math.min(state.maxW, width));
     height = Math.max(state.minHeight, Math.min(state.maxH, height));
     if (dir.includes('w')) x = state.x + state.width - width;
@@ -1920,13 +1887,16 @@ ipcMain.handle('settings:save', (_event, input) => {
       x: settings.left ?? 0,
       y: settings.top ?? 0,
     }).workArea;
-    let width = Math.max(MIN_WIDTH, Math.min(area.width - 20, Number(data.width) || settings.width || WIDTH));
-    let height = heightForWidth(width);
-    if (height > Math.min(area.height - 20, MAX_HEIGHT)) {
-      height = Math.max(MIN_HEIGHT, Math.min(area.height - 20, MAX_HEIGHT));
-      width = Math.max(MIN_WIDTH, Math.min(area.width - 20, widthForHeight(height)));
-      height = heightForWidth(width);
-    }
+    // A card size preset arrives as a width alone and keeps the card's shape.
+    // Every other save keeps the width and height the window already has, so a
+    // window stretched by hand is not snapped back to the canvas ratio.
+    const preset = Number(data.width) > 0;
+    let width = preset
+      ? Math.max(MIN_WIDTH, Math.min(area.width - 20, MAX_WIDTH, Number(data.width)))
+      : Math.max(MIN_WIDTH, Math.min(area.width - 20, MAX_WIDTH, settings.width || WIDTH));
+    let height = preset
+      ? heightForWidth(width)
+      : Math.max(MIN_HEIGHT, Math.min(area.height - 20, MAX_HEIGHT, settings.height || heightForWidth(width)));
     const rawGateway = String(data.gateway ?? '').trim();
     const nextGateway = rawGateway ? normalizeGateway(rawGateway) : null;
     const gatewayChanged = nextGateway !== settings.gateway;

@@ -62,7 +62,14 @@ async function run(){try{
     await sleep(45);assert.equal(lastDirection,direction,`${direction}: renderer did not start resizing`);
     cursor={x:cursor.x+(direction.includes('w')?-36:direction.includes('e')?36:0),y:cursor.y+(direction.includes('n')?-24:direction.includes('s')?24:0)};
     await sleep(65);const after=win.getBounds();
-    assert.ok(after.width>baseline.width&&after.height>baseline.height,`${material} ${width} ${direction}: ${JSON.stringify(after)}`);
+    // A pure edge moves one axis and leaves the other alone; a corner moves
+    // both. This is the regression the ratio lock used to hide.
+    const growsWidth = direction.includes('e') || direction.includes('w');
+    const growsHeight = direction.includes('s') || direction.includes('n');
+    assert.ok(growsWidth ? after.width>baseline.width : after.width===baseline.width,
+      `${material} ${width} ${direction}: width ${baseline.width} -> ${after.width}`);
+    assert.ok(growsHeight ? after.height>baseline.height : after.height===baseline.height,
+      `${material} ${width} ${direction}: height ${baseline.height} -> ${after.height}`);
     if(direction.includes('w'))assert.equal(after.x+after.width,baseline.x+baseline.width);
     if(direction.includes('n'))assert.equal(after.y+after.height,baseline.y+baseline.height);
     await js(`window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0,buttons:0,pointerId:1}))`);
