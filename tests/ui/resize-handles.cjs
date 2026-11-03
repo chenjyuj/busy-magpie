@@ -63,13 +63,19 @@ async function run(){try{
     cursor={x:cursor.x+(direction.includes('w')?-36:direction.includes('e')?36:0),y:cursor.y+(direction.includes('n')?-24:direction.includes('s')?24:0)};
     await sleep(65);const after=win.getBounds();
     // A pure edge moves one axis and leaves the other alone; a corner moves
-    // both. This is the regression the ratio lock used to hide.
+    // both while keeping the card's shape.
     const growsWidth = direction.includes('e') || direction.includes('w');
     const growsHeight = direction.includes('s') || direction.includes('n');
     assert.ok(growsWidth ? after.width>baseline.width : after.width===baseline.width,
       `${material} ${width} ${direction}: width ${baseline.width} -> ${after.width}`);
     assert.ok(growsHeight ? after.height>baseline.height : after.height===baseline.height,
       `${material} ${width} ${direction}: height ${baseline.height} -> ${after.height}`);
+    if(growsWidth&&growsHeight){
+      // A corner keeps the card's shape: (w - 32) / (h - 32) stays at the
+      // canvas ratio 1.5, so dragging a corner never distorts the content.
+      const ratio=(after.width-32)/(after.height-32);
+      assert.ok(Math.abs(ratio-1.5)<0.05,`${material} ${width} ${direction}: corner lost the card ratio (${ratio.toFixed(3)})`);
+    }
     if(direction.includes('w'))assert.equal(after.x+after.width,baseline.x+baseline.width);
     if(direction.includes('n'))assert.equal(after.y+after.height,baseline.y+baseline.height);
     await js(`window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0,buttons:0,pointerId:1}))`);

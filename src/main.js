@@ -48,6 +48,10 @@ const SIZE_EPOCH = 2;
 function heightForWidth(width) {
   return Math.round((width - CARD_PAD) / CARD_RATIO) + CARD_PAD;
 }
+
+function widthForHeight(height) {
+  return Math.round((height - CARD_PAD) * CARD_RATIO) + CARD_PAD;
+}
 const ASSETS = path.join(__dirname, '..', 'assets');
 const RENDERER = path.join(__dirname, '..', 'web', 'index.html');
 const IS_MAC = process.platform === 'darwin';
@@ -1240,9 +1244,21 @@ function startResize(direction = 'se') {
       height = Math.max(state.minHeight, Math.min(state.maxH, height - dy));
     }
 
-    // Each edge moves its own axis: a horizontal drag changes the width and a
-    // vertical one the height, and a corner does both. The canvas stretches to
-    // fill whatever shape the window ends up in.
+    // A pure edge moves its own axis only, which is what lets the card be
+    // stretched wider or taller. A corner keeps the card's shape instead: the
+    // height follows the width, so the canvas is never left distorted.
+    const horizontal = dir.includes('e') || dir.includes('w');
+    const vertical = dir.includes('s') || dir.includes('n');
+    if (horizontal && vertical) {
+      height = heightForWidth(width);
+      if (height > state.maxH) {
+        height = state.maxH;
+        width = widthForHeight(height);
+      } else if (height < state.minHeight) {
+        height = state.minHeight;
+        width = widthForHeight(height);
+      }
+    }
     width = Math.max(state.minWidth, Math.min(state.maxW, width));
     height = Math.max(state.minHeight, Math.min(state.maxH, height));
     if (dir.includes('w')) x = state.x + state.width - width;
